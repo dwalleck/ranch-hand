@@ -1,6 +1,12 @@
 #!/bin/sh
 # Pre-commit hook for ranch-hand
-# Runs beads flush, formatting check, linting, and tests before allowing commits
+# Runs beads flush, formatting, and linting before allowing commits
+#
+# To bypass hooks for work-in-progress commits:
+#   git commit --no-verify -m "WIP: ..."
+#
+# To run with tests (slower):
+#   RH_PRE_COMMIT_TEST=1 git commit -m "..."
 
 set -e
 
@@ -11,7 +17,9 @@ set -e
 if command -v bd >/dev/null 2>&1; then
     if [ -d .beads ]; then
         echo "Flushing beads changes..."
-        bd sync --flush-only 2>/dev/null || true
+        if ! bd sync --flush-only 2>&1; then
+            echo "Warning: bd sync --flush-only failed (continuing anyway)"
+        fi
     fi
 fi
 
@@ -31,7 +39,11 @@ fi
 echo "Running clippy..."
 cargo clippy -- -D warnings
 
-echo "Running tests..."
-cargo test
+# Tests are run in CI - skip locally for faster commits
+# Set RH_PRE_COMMIT_TEST=1 to run tests locally
+if [ "${RH_PRE_COMMIT_TEST:-}" = "1" ]; then
+    echo "Running tests..."
+    cargo test --quiet
+fi
 
 echo "All pre-commit checks passed!"
