@@ -17,7 +17,7 @@ set -e
 if command -v bd >/dev/null 2>&1; then
     if [ -d .beads ]; then
         echo "Flushing beads changes..."
-        if ! bd sync --flush-only 2>&1; then
+        if ! bd sync --flush-only >/dev/null 2>&1; then
             echo "Warning: bd sync --flush-only failed (continuing anyway)"
         fi
     fi
@@ -31,11 +31,13 @@ if ! cargo fmt --check; then
     echo ""
     echo "Auto-formatting code..."
     cargo fmt
+    git add -u  # Stage the formatted changes
     echo ""
-    echo "Code has been formatted. Please review the changes and re-commit."
-    exit 1
+    echo "Code has been formatted and staged. Proceeding with commit."
 fi
 
+# Clippy treats warnings as errors in pre-commit for stricter enforcement
+# (matches CI behavior, while regular cargo build keeps them as warnings)
 echo "Running clippy..."
 cargo clippy -- -D warnings
 
