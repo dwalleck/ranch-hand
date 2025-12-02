@@ -1,0 +1,30 @@
+#!/bin/sh
+# Pre-commit hook for ranch-hand
+# Runs beads flush, formatting check, linting, and tests before allowing commits
+
+set -e
+
+# --- Beads flush (from beads pre-commit hook) ---
+# This ensures that any pending bd issue changes are flushed to
+# .beads/issues.jsonl before the commit is created
+
+if command -v bd >/dev/null 2>&1; then
+    if [ -d .beads ]; then
+        echo "Flushing beads changes..."
+        bd sync --flush-only 2>/dev/null || true
+    fi
+fi
+
+# --- Cargo checks ---
+echo "Running pre-commit checks..."
+
+echo "Checking formatting..."
+cargo fmt --check
+
+echo "Running clippy..."
+cargo clippy -- -D warnings
+
+echo "Running tests..."
+cargo test
+
+echo "All pre-commit checks passed!"

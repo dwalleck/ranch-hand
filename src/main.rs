@@ -6,7 +6,7 @@ mod paths;
 
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands, CacheCommands, CertsCommands, SettingsCommands};
+use cli::{CacheCommands, CertsCommands, Cli, Commands, SettingsCommands};
 use tracing::Level;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -62,7 +62,17 @@ async fn main() -> Result<()> {
             body,
             input,
             raw,
-        } => commands::api::run(&cli, endpoint, method.clone(), body.clone(), input.clone(), *raw).await,
+        } => {
+            commands::api::run(
+                &cli,
+                endpoint,
+                method.clone(),
+                body.clone(),
+                input.clone(),
+                *raw,
+            )
+            .await
+        }
         Commands::Certs { command } => match command {
             CertsCommands::Check => commands::certs::check(&cli).await,
         },
