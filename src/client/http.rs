@@ -159,7 +159,10 @@ async fn handle_certificate_error(
             .with_prompt("Do you want to proceed anyway? (insecure)")
             .default(false)
             .interact()
-            .unwrap_or(false);
+            .unwrap_or_else(|e| {
+                warn!("Failed to get user confirmation: {e}, defaulting to deny");
+                false
+            });
 
         if proceed {
             let insecure_client = build_insecure_client()?;
