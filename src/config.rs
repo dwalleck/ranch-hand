@@ -5,6 +5,12 @@ use std::fs;
 use std::path::PathBuf;
 use thiserror::Error;
 
+/// Default port for the Rancher Desktop API
+pub const DEFAULT_API_PORT: u16 = 6107;
+
+/// Default host for the Rancher Desktop API
+pub const DEFAULT_API_HOST: &str = "127.0.0.1";
+
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("rd-engine.json not found - is Rancher Desktop running?")]
@@ -26,7 +32,7 @@ pub struct RdEngineConfig {
 }
 
 fn default_host() -> String {
-    "127.0.0.1".to_string()
+    DEFAULT_API_HOST.to_string()
 }
 
 impl Default for RdEngineConfig {
@@ -35,7 +41,7 @@ impl Default for RdEngineConfig {
             user: String::new(),
             password: String::new(),
             host: default_host(),
-            port: 6107,
+            port: DEFAULT_API_PORT,
         }
     }
 }
@@ -71,12 +77,8 @@ impl RdEngineConfig {
 
     /// Get the full URL for an API endpoint
     pub fn api_url(&self, endpoint: &str) -> String {
-        let endpoint = if endpoint.starts_with('/') {
-            endpoint.to_string()
-        } else {
-            format!("/{}", endpoint)
-        };
-        format!("{}{}", self.api_base_url(), endpoint)
+        let endpoint = endpoint.trim_start_matches('/');
+        format!("{}/{}", self.api_base_url(), endpoint)
     }
 
     /// Get basic auth header value
@@ -183,7 +185,7 @@ mod tests {
             user: "admin".to_string(),
             password: "secret".to_string(),
             host: "127.0.0.1".to_string(),
-            port: 6107,
+            port: DEFAULT_API_PORT,
         };
 
         assert_eq!(config.api_base_url(), "http://127.0.0.1:6107");
@@ -195,6 +197,11 @@ mod tests {
             config.api_url("v1/settings"),
             "http://127.0.0.1:6107/v1/settings"
         );
+        // Handle multiple leading slashes
+        assert_eq!(
+            config.api_url("///v1/settings"),
+            "http://127.0.0.1:6107/v1/settings"
+        );
     }
 
     #[test]
@@ -203,7 +210,7 @@ mod tests {
             user: "admin".to_string(),
             password: "secret".to_string(),
             host: "127.0.0.1".to_string(),
-            port: 6107,
+            port: DEFAULT_API_PORT,
         };
 
         // base64("admin:secret") = "YWRtaW46c2VjcmV0"

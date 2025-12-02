@@ -1,7 +1,28 @@
+//! HTTP client with SSL certificate bypass support.
+//!
+//! # Why Certificate Bypass?
+//!
+//! This module intentionally provides the ability to bypass SSL certificate validation.
+//! This is a core feature of ranch-hand, not a security oversight.
+//!
+//! Many corporate environments use SSL inspection proxies (e.g., Zscaler, iboss, BlueCoat)
+//! that intercept HTTPS traffic by presenting their own certificates. This causes
+//! certificate validation failures when downloading k3s releases from GitHub or
+//! connecting to other external services.
+//!
+//! Users in these environments have two options:
+//! 1. Request IT to whitelist specific domains (often slow or impossible)
+//! 2. Use the `--insecure` flag to bypass validation (with user consent)
+//!
+//! The tool provides interactive prompts to ensure users understand the security
+//! implications before proceeding with certificate bypass.
+
 use anyhow::{Context, Result};
 use dialoguer::Confirm;
 use reqwest::Client;
+use std::io::IsTerminal;
 use thiserror::Error;
+use tracing::warn;
 
 #[derive(Error, Debug)]
 pub enum HttpClientError {
@@ -40,8 +61,18 @@ impl HttpClientConfig {
     }
 }
 
-/// Build an HTTP client with optional SSL certificate bypass
+/// Build an HTTP client with optional SSL certificate bypass.
+///
+/// # Security Note
+///
+/// When `config.insecure` is true, this client will accept ANY certificate,
+/// including self-signed, expired, or mismatched certificates. This is
+/// intentional for corporate proxy environments - see module documentation.
 pub fn build_client(config: &HttpClientConfig) -> Result<Client> {
+    if config.insecure {
+        warn!("Building HTTP client with certificate validation DISABLED");
+    }
+
     let builder = Client::builder()
         .danger_accept_invalid_certs(config.insecure)
         .timeout(std::time::Duration::from_secs(30));
@@ -49,8 +80,15 @@ pub fn build_client(config: &HttpClientConfig) -> Result<Client> {
     builder.build().context("Failed to build HTTP client")
 }
 
-/// Build an insecure HTTP client (bypasses all certificate validation)
+/// Build an insecure HTTP client (bypasses all certificate validation).
+///
+/// # Security Note
+///
+/// This function is used when the user explicitly consents to bypass
+/// certificate validation, either via `--insecure` flag or interactive prompt.
+/// See module documentation for why this feature exists.
 pub fn build_insecure_client() -> Result<Client> {
+    warn!("Certificate validation bypassed by user request");
     build_client(&HttpClientConfig::new(true))
 }
 
@@ -106,7 +144,7 @@ async fn handle_certificate_error(
     }
 
     // If interactive mode is enabled, prompt the user
-    if config.interactive && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+    if config.interactive && std::io::stdin().is_terminal() {
         eprintln!();
         eprintln!("Certificate validation failed for {}", domain);
         eprintln!("Reason: {}", error_reason);
