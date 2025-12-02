@@ -1,3 +1,7 @@
+// This module provides configuration infrastructure that will be used by command implementations.
+// Allow dead_code during infrastructure phase - will be removed when commands are implemented.
+#![allow(dead_code)]
+
 use crate::paths;
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -96,7 +100,7 @@ impl RdEngineConfig {
         use base64::Engine;
         let credentials = format!("{}:{}", self.user, self.password);
         let encoded = base64::engine::general_purpose::STANDARD.encode(credentials);
-        format!("Basic {}", encoded)
+        format!("Basic {encoded}")
     }
 }
 

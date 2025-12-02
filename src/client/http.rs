@@ -1,3 +1,7 @@
+// This module provides HTTP client infrastructure that will be used by command implementations.
+// Allow dead_code during infrastructure phase - will be removed when commands are implemented.
+#![allow(dead_code)]
+
 //! HTTP client with SSL certificate bypass support.
 //!
 //! # Why Certificate Bypass?
@@ -5,7 +9,7 @@
 //! This module intentionally provides the ability to bypass SSL certificate validation.
 //! This is a core feature of ranch-hand, not a security oversight.
 //!
-//! Many corporate environments use SSL inspection proxies (e.g., Zscaler, iboss, BlueCoat)
+//! Many corporate environments use SSL inspection proxies (e.g., Zscaler, iboss, `BlueCoat`)
 //! that intercept HTTPS traffic by presenting their own certificates. This causes
 //! certificate validation failures when downloading k3s releases from GitHub or
 //! connecting to other external services.
@@ -166,8 +170,8 @@ async fn handle_certificate_error(
     // If interactive mode is enabled, prompt the user
     if config.interactive && std::io::stdin().is_terminal() {
         eprintln!();
-        eprintln!("Certificate validation failed for {}", domain);
-        eprintln!("Reason: {}", error_reason);
+        eprintln!("Certificate validation failed for {domain}");
+        eprintln!("Reason: {error_reason}");
         eprintln!();
 
         if detect_corporate_proxy(&error_reason) {
@@ -230,7 +234,7 @@ fn extract_cert_error_reason(error: &reqwest::Error) -> String {
     }
 
     // Fall back to the raw error
-    format!("Certificate error: {}", error_str)
+    format!("Certificate error: {error_str}")
 }
 
 /// Detect if the certificate error is likely from a corporate proxy

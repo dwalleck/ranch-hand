@@ -1,3 +1,7 @@
+// This module provides path resolution infrastructure that will be used by command implementations.
+// Allow dead_code during infrastructure phase - will be removed when commands are implemented.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use thiserror::Error;
 
