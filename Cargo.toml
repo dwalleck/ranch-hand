@@ -1,0 +1,43 @@
+[package]
+name = "ranch-hand"
+version = "0.1.0"
+edition = "2021"
+description = "A CLI tool for managing Rancher Desktop"
+authors = ["dwalleck"]
+license = "MIT"
+repository = "https://github.com/dwalleck/ranch-hand"
+
+[[bin]]
+name = "rh"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "env"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+dirs = "5"
+indicatif = "0.17"
+colored = "2"
+dialoguer = "0.11"
+thiserror = "2"
+anyhow = "1"
+futures-util = "0.3"
+url = "2"
+base64 = "0.22"
+rustls = "0.23"
+tokio-rustls = "0.26"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
