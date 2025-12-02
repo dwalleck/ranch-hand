@@ -23,8 +23,8 @@ fn init_tracing(verbose: u8, quiet: bool) {
     };
 
     let filter = EnvFilter::from_default_env()
-        .add_directive(format!("rh={}", level).parse().unwrap())
-        .add_directive(format!("ranch_hand={}", level).parse().unwrap());
+        .add_directive(format!("rh={level}").parse().unwrap_or_else(|_| level.into()))
+        .add_directive(format!("ranch_hand={level}").parse().unwrap_or_else(|_| level.into()));
 
     fmt()
         .with_env_filter(filter)
