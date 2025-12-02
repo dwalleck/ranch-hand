@@ -202,6 +202,10 @@ async fn handle_certificate_error(
             .default(false)
             .interact()
             .unwrap_or_else(|e| {
+                // Print to stderr so users understand why the operation was denied,
+                // in addition to logging for diagnostics
+                eprintln!("Failed to get user confirmation: {e}");
+                eprintln!("Defaulting to deny for security.");
                 warn!("Failed to get user confirmation: {e}, defaulting to deny");
                 false
             });
