@@ -7,10 +7,36 @@ mod paths;
 use anyhow::Result;
 use clap::Parser;
 use cli::{Cli, Commands, CacheCommands, CertsCommands, SettingsCommands};
+use tracing::Level;
+use tracing_subscriber::{fmt, EnvFilter};
+
+fn init_tracing(verbose: u8, quiet: bool) {
+    let level = if quiet {
+        Level::ERROR
+    } else {
+        match verbose {
+            0 => Level::WARN,
+            1 => Level::INFO,
+            2 => Level::DEBUG,
+            _ => Level::TRACE,
+        }
+    };
+
+    let filter = EnvFilter::from_default_env()
+        .add_directive(format!("rh={}", level).parse().unwrap())
+        .add_directive(format!("ranch_hand={}", level).parse().unwrap());
+
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_ansi(true)
+        .init();
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+    init_tracing(cli.verbose, cli.quiet);
 
     match &cli.command {
         Commands::Cache { command } => match command {
