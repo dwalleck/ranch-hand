@@ -75,12 +75,30 @@ impl HttpClientConfig {
         }
     }
 
+    /// Create a new config with custom timeout
+    pub fn with_timeout(insecure: bool, timeout_secs: u64) -> Self {
+        Self {
+            insecure,
+            interactive: !insecure,
+            timeout_secs,
+        }
+    }
+
     /// Create a config suitable for large file downloads
     pub fn for_downloads(insecure: bool) -> Self {
         Self {
             insecure,
             interactive: !insecure,
             timeout_secs: DEFAULT_DOWNLOAD_TIMEOUT_SECS,
+        }
+    }
+
+    /// Create a config for downloads with custom timeout
+    pub fn for_downloads_with_timeout(insecure: bool, timeout_secs: u64) -> Self {
+        Self {
+            insecure,
+            interactive: !insecure,
+            timeout_secs,
         }
     }
 }

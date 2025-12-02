@@ -17,8 +17,8 @@ pub const DEFAULT_API_HOST: &str = "127.0.0.1";
 
 #[derive(Error, Debug)]
 pub enum ConfigError {
-    #[error("rd-engine.json not found - is Rancher Desktop running?")]
-    NotFound,
+    #[error("rd-engine.json not found at {path}\n\nThis file is created when Rancher Desktop is running.\nPlease ensure Rancher Desktop is started and try again.\n\nExpected location: {path}")]
+    NotFound { path: String },
     #[error("Failed to read rd-engine.json: {0}")]
     ReadError(String),
     #[error("Failed to parse rd-engine.json: {0}")]
@@ -71,8 +71,9 @@ impl RdEngineConfig {
 
     /// Load configuration from a specific path
     pub fn load_from_path(path: &PathBuf) -> Result<Self, ConfigError> {
+        let path_str = path.display().to_string();
         let contents = fs::read_to_string(path).map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => ConfigError::NotFound,
+            std::io::ErrorKind::NotFound => ConfigError::NotFound { path: path_str },
             _ => ConfigError::ReadError(e.to_string()),
         })?;
 
@@ -89,7 +90,18 @@ impl RdEngineConfig {
         format!("http://{}:{}", self.host, self.port)
     }
 
-    /// Get the full URL for an API endpoint
+    /// Get the full URL for an API endpoint.
+    ///
+    /// Normalizes the endpoint by stripping any leading slashes to ensure
+    /// consistent URL construction regardless of whether the caller includes
+    /// a leading slash or not.
+    ///
+    /// # Examples
+    ///
+    /// All of these produce the same result:
+    /// - `api_url("/v1/settings")` → `http://127.0.0.1:6107/v1/settings`
+    /// - `api_url("v1/settings")` → `http://127.0.0.1:6107/v1/settings`
+    /// - `api_url("///v1/settings")` → `http://127.0.0.1:6107/v1/settings`
     pub fn api_url(&self, endpoint: &str) -> String {
         let endpoint = endpoint.trim_start_matches('/');
         format!("{}/{}", self.api_base_url(), endpoint)
@@ -117,6 +129,10 @@ pub struct AppConfig {
     pub verbose: u8,
     /// Suppress output
     pub quiet: bool,
+    /// Timeout for API requests in seconds
+    pub timeout: u64,
+    /// Timeout for file downloads in seconds
+    pub download_timeout: u64,
 }
 
 impl AppConfig {
@@ -134,6 +150,8 @@ impl AppConfig {
             json: cli.json,
             verbose: cli.verbose,
             quiet: cli.quiet,
+            timeout: cli.timeout,
+            download_timeout: cli.download_timeout,
         }
     }
 
@@ -235,7 +253,7 @@ mod tests {
     fn test_config_not_found() {
         let result =
             RdEngineConfig::load_from_path(&PathBuf::from("/nonexistent/path/rd-engine.json"));
-        assert!(matches!(result, Err(ConfigError::NotFound)));
+        assert!(matches!(result, Err(ConfigError::NotFound { .. })));
     }
 
     #[test]

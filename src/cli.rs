@@ -26,6 +26,14 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub quiet: bool,
 
+    /// Timeout for API requests in seconds (default: 30)
+    #[arg(long, global = true, env = "RH_TIMEOUT", default_value = "30")]
+    pub timeout: u64,
+
+    /// Timeout for file downloads in seconds (default: 600)
+    #[arg(long, global = true, env = "RH_DOWNLOAD_TIMEOUT", default_value = "600")]
+    pub download_timeout: u64,
+
     #[command(subcommand)]
     pub command: Commands,
 }

@@ -22,13 +22,19 @@ fn init_tracing(verbose: u8, quiet: bool) {
         }
     };
 
+    // Note: We use eprintln! here because tracing isn't initialized yet.
+    // These warnings occur during tracing setup, so we can't use tracing to log them.
     let filter = EnvFilter::from_default_env()
         .add_directive(format!("rh={level}").parse().unwrap_or_else(|e| {
-            eprintln!("Warning: failed to parse log directive: {e}");
+            if !quiet {
+                eprintln!("Warning: failed to parse log directive: {e}");
+            }
             level.into()
         }))
         .add_directive(format!("ranch_hand={level}").parse().unwrap_or_else(|e| {
-            eprintln!("Warning: failed to parse log directive: {e}");
+            if !quiet {
+                eprintln!("Warning: failed to parse log directive: {e}");
+            }
             level.into()
         }));
 
