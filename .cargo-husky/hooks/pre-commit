@@ -19,7 +19,14 @@ fi
 echo "Running pre-commit checks..."
 
 echo "Checking formatting..."
-cargo fmt --check
+if ! cargo fmt --check; then
+    echo ""
+    echo "Auto-formatting code..."
+    cargo fmt
+    echo ""
+    echo "Code has been formatted. Please review the changes and re-commit."
+    exit 1
+fi
 
 echo "Running clippy..."
 cargo clippy -- -D warnings
