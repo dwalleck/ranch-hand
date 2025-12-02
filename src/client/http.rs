@@ -1,0 +1,246 @@
+use anyhow::{Context, Result};
+use dialoguer::Confirm;
+use reqwest::Client;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum HttpClientError {
+    #[error("SSL certificate validation failed for {domain}: {reason}")]
+    CertificateError { domain: String, reason: String },
+    #[error("Connection refused - is Rancher Desktop running?")]
+    ConnectionRefused,
+    #[error("Request failed: {0}")]
+    RequestFailed(String),
+}
+
+/// Configuration for the HTTP client
+#[derive(Clone, Debug)]
+pub struct HttpClientConfig {
+    /// Accept invalid SSL certificates
+    pub insecure: bool,
+    /// Enable interactive prompts for certificate errors
+    pub interactive: bool,
+}
+
+impl Default for HttpClientConfig {
+    fn default() -> Self {
+        Self {
+            insecure: false,
+            interactive: true,
+        }
+    }
+}
+
+impl HttpClientConfig {
+    pub fn new(insecure: bool) -> Self {
+        Self {
+            insecure,
+            interactive: !insecure, // Don't prompt if already insecure
+        }
+    }
+}
+
+/// Build an HTTP client with optional SSL certificate bypass
+pub fn build_client(config: &HttpClientConfig) -> Result<Client> {
+    let builder = Client::builder()
+        .danger_accept_invalid_certs(config.insecure)
+        .timeout(std::time::Duration::from_secs(30));
+
+    builder.build().context("Failed to build HTTP client")
+}
+
+/// Build an insecure HTTP client (bypasses all certificate validation)
+pub fn build_insecure_client() -> Result<Client> {
+    build_client(&HttpClientConfig::new(true))
+}
+
+/// Attempt a request, handling certificate errors with optional interactive prompt
+pub async fn request_with_cert_handling(
+    url: &str,
+    config: &HttpClientConfig,
+) -> Result<reqwest::Response> {
+    // First try with the configured client
+    let client = build_client(config)?;
+
+    match client.get(url).send().await {
+        Ok(response) => Ok(response),
+        Err(e) => {
+            // Check if this is a certificate error
+            if is_certificate_error(&e) {
+                handle_certificate_error(url, &e, config).await
+            } else if e.is_connect() {
+                Err(HttpClientError::ConnectionRefused.into())
+            } else {
+                Err(HttpClientError::RequestFailed(e.to_string()).into())
+            }
+        }
+    }
+}
+
+/// Check if an error is related to SSL certificates
+fn is_certificate_error(error: &reqwest::Error) -> bool {
+    let error_str = error.to_string().to_lowercase();
+    error_str.contains("certificate")
+        || error_str.contains("ssl")
+        || error_str.contains("tls")
+        || error_str.contains("self signed")
+        || error_str.contains("unable to get local issuer")
+}
+
+/// Handle certificate errors with optional interactive prompt
+async fn handle_certificate_error(
+    url: &str,
+    error: &reqwest::Error,
+    config: &HttpClientConfig,
+) -> Result<reqwest::Response> {
+    let domain = extract_domain(url);
+    let error_reason = extract_cert_error_reason(error);
+
+    // If already in insecure mode, this shouldn't happen, but propagate the error
+    if config.insecure {
+        return Err(HttpClientError::CertificateError {
+            domain,
+            reason: error_reason,
+        }
+        .into());
+    }
+
+    // If interactive mode is enabled, prompt the user
+    if config.interactive && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+        eprintln!();
+        eprintln!("Certificate validation failed for {}", domain);
+        eprintln!("Reason: {}", error_reason);
+        eprintln!();
+
+        if detect_corporate_proxy(&error_reason) {
+            eprintln!("This appears to be a corporate SSL inspection proxy.");
+            eprintln!();
+        }
+
+        let proceed = Confirm::new()
+            .with_prompt("Do you want to proceed anyway? (insecure)")
+            .default(false)
+            .interact()
+            .unwrap_or(false);
+
+        if proceed {
+            let insecure_client = build_insecure_client()?;
+            return insecure_client
+                .get(url)
+                .send()
+                .await
+                .context("Request failed even with certificate bypass");
+        }
+    }
+
+    Err(HttpClientError::CertificateError {
+        domain,
+        reason: error_reason,
+    }
+    .into())
+}
+
+/// Extract domain from URL
+fn extract_domain(url: &str) -> String {
+    url::Url::parse(url)
+        .map(|u| u.host_str().unwrap_or("unknown").to_string())
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+/// Extract a human-readable reason from certificate errors
+fn extract_cert_error_reason(error: &reqwest::Error) -> String {
+    let error_str = error.to_string();
+
+    if error_str.contains("self signed") || error_str.contains("SELF_SIGNED") {
+        return "Self-signed certificate in chain".to_string();
+    }
+    if error_str.contains("unable to get local issuer") {
+        return "Unable to verify certificate chain".to_string();
+    }
+    if error_str.contains("certificate has expired") {
+        return "Certificate has expired".to_string();
+    }
+    if error_str.contains("hostname mismatch") {
+        return "Certificate hostname mismatch".to_string();
+    }
+
+    // Fall back to the raw error
+    format!("Certificate error: {}", error_str)
+}
+
+/// Detect if the certificate error is likely from a corporate proxy
+fn detect_corporate_proxy(reason: &str) -> bool {
+    let lower = reason.to_lowercase();
+    lower.contains("self signed")
+        || lower.contains("self_signed")
+        || lower.contains("unable to get local issuer")
+}
+
+/// Known corporate proxy certificate issuers
+pub const KNOWN_PROXY_ISSUERS: &[&str] = &[
+    "iboss",
+    "zscaler",
+    "bluecoat",
+    "forcepoint",
+    "symantec",
+    "mcafee",
+    "cisco",
+    "palo alto",
+    "fortinet",
+    "websense",
+    "netskope",
+];
+
+/// Check if a certificate issuer looks like a corporate proxy
+pub fn is_proxy_issuer(issuer: &str) -> bool {
+    let lower = issuer.to_lowercase();
+    KNOWN_PROXY_ISSUERS
+        .iter()
+        .any(|proxy| lower.contains(proxy))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_domain() {
+        assert_eq!(extract_domain("https://github.com/foo"), "github.com");
+        assert_eq!(
+            extract_domain("https://api.github.com/repos"),
+            "api.github.com"
+        );
+        assert_eq!(extract_domain("invalid"), "unknown");
+    }
+
+    #[test]
+    fn test_detect_corporate_proxy() {
+        assert!(detect_corporate_proxy("self signed certificate in chain"));
+        assert!(detect_corporate_proxy("SELF_SIGNED_CERT_IN_CHAIN"));
+        assert!(detect_corporate_proxy("unable to get local issuer certificate"));
+        assert!(!detect_corporate_proxy("connection refused"));
+    }
+
+    #[test]
+    fn test_is_proxy_issuer() {
+        assert!(is_proxy_issuer("iboss Network Security"));
+        assert!(is_proxy_issuer("Zscaler Root CA"));
+        assert!(is_proxy_issuer("BlueCoat ProxySG"));
+        assert!(!is_proxy_issuer("DigiCert Global Root CA"));
+        assert!(!is_proxy_issuer("Let's Encrypt"));
+    }
+
+    #[test]
+    fn test_client_config_default() {
+        let config = HttpClientConfig::default();
+        assert!(!config.insecure);
+        assert!(config.interactive);
+    }
+
+    #[test]
+    fn test_client_config_insecure() {
+        let config = HttpClientConfig::new(true);
+        assert!(config.insecure);
+        assert!(!config.interactive); // Should disable prompts when insecure
+    }
+}
