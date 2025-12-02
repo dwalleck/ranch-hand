@@ -34,6 +34,12 @@ pub enum HttpClientError {
     RequestFailed(String),
 }
 
+/// Default timeout for API requests (30 seconds)
+pub const DEFAULT_API_TIMEOUT_SECS: u64 = 30;
+
+/// Default timeout for file downloads (10 minutes - k3s images can be large)
+pub const DEFAULT_DOWNLOAD_TIMEOUT_SECS: u64 = 600;
+
 /// Configuration for the HTTP client
 #[derive(Clone, Debug)]
 pub struct HttpClientConfig {
@@ -41,6 +47,8 @@ pub struct HttpClientConfig {
     pub insecure: bool,
     /// Enable interactive prompts for certificate errors
     pub interactive: bool,
+    /// Request timeout in seconds
+    pub timeout_secs: u64,
 }
 
 impl Default for HttpClientConfig {
@@ -48,15 +56,27 @@ impl Default for HttpClientConfig {
         Self {
             insecure: false,
             interactive: true,
+            timeout_secs: DEFAULT_API_TIMEOUT_SECS,
         }
     }
 }
 
 impl HttpClientConfig {
+    /// Create a new config for API requests
     pub fn new(insecure: bool) -> Self {
         Self {
             insecure,
             interactive: !insecure, // Don't prompt if already insecure
+            timeout_secs: DEFAULT_API_TIMEOUT_SECS,
+        }
+    }
+
+    /// Create a config suitable for large file downloads
+    pub fn for_downloads(insecure: bool) -> Self {
+        Self {
+            insecure,
+            interactive: !insecure,
+            timeout_secs: DEFAULT_DOWNLOAD_TIMEOUT_SECS,
         }
     }
 }
@@ -75,7 +95,7 @@ pub fn build_client(config: &HttpClientConfig) -> Result<Client> {
 
     let builder = Client::builder()
         .danger_accept_invalid_certs(config.insecure)
-        .timeout(std::time::Duration::from_secs(30));
+        .timeout(std::time::Duration::from_secs(config.timeout_secs));
 
     builder.build().context("Failed to build HTTP client")
 }
@@ -183,9 +203,13 @@ async fn handle_certificate_error(
 
 /// Extract domain from URL
 fn extract_domain(url: &str) -> String {
-    url::Url::parse(url)
-        .map(|u| u.host_str().unwrap_or("unknown").to_string())
-        .unwrap_or_else(|_| "unknown".to_string())
+    match url::Url::parse(url) {
+        Ok(u) => u.host_str().unwrap_or("unknown").to_string(),
+        Err(e) => {
+            warn!("Failed to parse URL '{url}': {e}");
+            "unknown".to_string()
+        }
+    }
 }
 
 /// Extract a human-readable reason from certificate errors
@@ -276,6 +300,7 @@ mod tests {
         let config = HttpClientConfig::default();
         assert!(!config.insecure);
         assert!(config.interactive);
+        assert_eq!(config.timeout_secs, DEFAULT_API_TIMEOUT_SECS);
     }
 
     #[test]
@@ -283,5 +308,14 @@ mod tests {
         let config = HttpClientConfig::new(true);
         assert!(config.insecure);
         assert!(!config.interactive); // Should disable prompts when insecure
+        assert_eq!(config.timeout_secs, DEFAULT_API_TIMEOUT_SECS);
+    }
+
+    #[test]
+    fn test_client_config_for_downloads() {
+        let config = HttpClientConfig::for_downloads(false);
+        assert!(!config.insecure);
+        assert!(config.interactive);
+        assert_eq!(config.timeout_secs, DEFAULT_DOWNLOAD_TIMEOUT_SECS);
     }
 }

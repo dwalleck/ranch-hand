@@ -22,13 +22,25 @@ pub enum ConfigError {
 }
 
 /// Credentials and connection info from rd-engine.json
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct RdEngineConfig {
     pub user: String,
     pub password: String,
     #[serde(default = "default_host")]
     pub host: String,
     pub port: u16,
+}
+
+// Custom Debug impl to avoid accidentally logging passwords
+impl std::fmt::Debug for RdEngineConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RdEngineConfig")
+            .field("user", &self.user)
+            .field("password", &"[REDACTED]")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .finish()
+    }
 }
 
 fn default_host() -> String {
@@ -55,12 +67,10 @@ impl RdEngineConfig {
 
     /// Load configuration from a specific path
     pub fn load_from_path(path: &PathBuf) -> Result<Self, ConfigError> {
-        if !path.exists() {
-            return Err(ConfigError::NotFound);
-        }
-
-        let contents =
-            fs::read_to_string(path).map_err(|e| ConfigError::ReadError(e.to_string()))?;
+        let contents = fs::read_to_string(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => ConfigError::NotFound,
+            _ => ConfigError::ReadError(e.to_string()),
+        })?;
 
         serde_json::from_str(&contents).map_err(|e| ConfigError::ParseError(e.to_string()))
     }
