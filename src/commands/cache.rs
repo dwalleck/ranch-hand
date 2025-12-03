@@ -9,6 +9,7 @@ use crate::utils::download::{
 };
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
+use futures_util::future::join_all;
 use indicatif::ProgressBar;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -354,6 +355,13 @@ async fn download_checksums(
     parse_checksum_file(&checksums_content)
 }
 
+/// Result of a single download operation
+struct DownloadResult {
+    filename: String,
+    progress_bar: Option<ProgressBar>,
+    result: Result<PathBuf>,
+}
+
 async fn download_remaining_files(
     cli: &Cli,
     version: &str,
@@ -364,33 +372,72 @@ async fn download_remaining_files(
     let files = get_download_files(arch);
     let manager = DownloadManager::new();
 
-    for (file_type, filename) in &files {
-        if *file_type == "checksums" {
-            continue;
-        }
+    // Build list of downloads to perform (excluding checksums)
+    let downloads: Vec<_> = files
+        .into_iter()
+        .filter(|(file_type, _)| *file_type != "checksums")
+        .map(|(file_type, filename)| {
+            let pb = if cli.quiet {
+                None
+            } else {
+                Some(manager.add_download(&filename))
+            };
+            (file_type, filename, pb)
+        })
+        .collect();
 
-        let pb = if cli.quiet {
-            None
-        } else {
-            Some(manager.add_download(filename))
-        };
+    // Create futures for all downloads
+    let download_futures = downloads.into_iter().map(|(file_type, filename, pb)| {
+        download_single_file(file_type, filename, pb, version, version_dir, arch, cli)
+    });
 
-        let download_result = if *file_type == "images" {
-            download_images_with_fallback(version, version_dir, arch, pb.as_ref(), cli).await
-        } else {
-            let url = format!("{K3S_RELEASES_URL}/{version}/{filename}");
-            let file_path = version_dir.join(filename);
-            download_with_progress(&url, &file_path, pb.as_ref(), cli).await
-        };
+    // Run all downloads in parallel
+    let results = join_all(download_futures).await;
 
-        match download_result {
+    // Process results and collect errors
+    process_download_results(results, checksums, cli)
+}
+
+async fn download_single_file(
+    file_type: &'static str,
+    filename: String,
+    progress_bar: Option<ProgressBar>,
+    version: &str,
+    version_dir: &Path,
+    arch: &str,
+    cli: &Cli,
+) -> DownloadResult {
+    let result = if file_type == "images" {
+        download_images_with_fallback(version, version_dir, arch, progress_bar.as_ref(), cli).await
+    } else {
+        let url = format!("{K3S_RELEASES_URL}/{version}/{filename}");
+        let file_path = version_dir.join(&filename);
+        download_with_progress(&url, &file_path, progress_bar.as_ref(), cli).await
+    };
+
+    DownloadResult {
+        filename,
+        progress_bar,
+        result,
+    }
+}
+
+fn process_download_results(
+    results: Vec<DownloadResult>,
+    checksums: &HashMap<String, String>,
+    cli: &Cli,
+) -> Result<()> {
+    let mut errors = Vec::new();
+
+    for download in results {
+        match download.result {
             Ok(downloaded_path) => {
                 let actual_filename = downloaded_path
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy();
 
-                if let Some(pb) = &pb {
+                if let Some(pb) = &download.progress_bar {
                     DownloadManager::finish_success(pb, actual_filename.as_ref());
                 }
 
@@ -398,15 +445,23 @@ async fn download_remaining_files(
                 verify_downloaded_file(cli, &downloaded_path, actual_filename.as_ref(), checksums);
             }
             Err(e) => {
-                if let Some(pb) = pb {
-                    DownloadManager::finish_error(&pb, filename);
+                if let Some(pb) = download.progress_bar {
+                    DownloadManager::finish_error(&pb, &download.filename);
                 }
-                return Err(e).with_context(|| format!("Failed to download {filename}"));
+                errors.push(format!("{}: {}", download.filename, e));
             }
         }
     }
 
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "Failed to download {} file(s):\n  {}",
+            errors.len(),
+            errors.join("\n  ")
+        ))
+    }
 }
 
 fn verify_downloaded_file(
