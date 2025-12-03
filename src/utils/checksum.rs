@@ -90,12 +90,13 @@ pub fn verify_file(path: &Path, expected_hash: &str) -> Result<()> {
     let expected_lower = expected_hash.to_lowercase();
 
     if actual_hash != expected_lower {
+        let filename = path
+            .file_name()
+            .ok_or_else(|| anyhow!("Invalid file path: {}", path.display()))?
+            .to_string_lossy()
+            .into();
         return Err(ChecksumError::Mismatch {
-            filename: path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into(),
+            filename,
             expected: expected_lower,
             actual: actual_hash,
         }
