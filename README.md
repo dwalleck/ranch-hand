@@ -146,6 +146,7 @@ Releases are automated via GitHub Actions. To create a new release:
      - macOS Intel (`x86_64-apple-darwin`)
      - macOS Apple Silicon (`aarch64-apple-darwin`)
      - Windows x64 (`x86_64-pc-windows-msvc`)
+     - Windows ARM64 (`aarch64-pc-windows-msvc`)
    - Generate SHA256 checksums
    - Create a GitHub Release with all artifacts
 
