@@ -28,24 +28,40 @@ fi
 # --- Cargo checks ---
 echo "Running pre-commit checks..."
 
-echo "Checking formatting..."
-# Get list of files that need formatting before running fmt
-UNFORMATTED=$(cargo fmt -- --check -l 2>/dev/null || true)
-if [ -n "$UNFORMATTED" ]; then
-    echo ""
-    echo "Auto-formatting code..."
-    cargo fmt
-    # Only stage the files that were actually formatted (not all tracked changes)
-    # Use while loop to safely handle paths with spaces or special characters
-    echo "$UNFORMATTED" | while IFS= read -r file; do
-        git add "$file"
+# Get list of staged Rust files only (not all files in the repo)
+STAGED_RS_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.rs$' || true)
+
+if [ -n "$STAGED_RS_FILES" ]; then
+    echo "Checking formatting of staged files..."
+    # Check if any staged files need formatting
+    NEEDS_FORMAT=false
+    for file in $STAGED_RS_FILES; do
+        if [ -f "$file" ] && ! cargo fmt -- --check "$file" >/dev/null 2>&1; then
+            NEEDS_FORMAT=true
+            break
+        fi
     done
-    echo ""
-    echo "Code has been formatted and staged. Proceeding with commit."
+
+    if [ "$NEEDS_FORMAT" = true ]; then
+        echo ""
+        echo "Auto-formatting staged Rust files..."
+        # Format only the staged files
+        echo "$STAGED_RS_FILES" | while IFS= read -r file; do
+            if [ -f "$file" ]; then
+                cargo fmt -- "$file"
+                git add "$file"
+            fi
+        done
+        echo ""
+        echo "Staged files have been formatted and re-staged."
+    fi
+else
+    echo "No staged Rust files to check."
 fi
 
 # Clippy treats warnings as errors in pre-commit for stricter enforcement
 # (matches CI behavior, while regular cargo build keeps them as warnings)
+# Run after formatting to ensure formatted code also passes
 echo "Running clippy..."
 cargo clippy -- -D warnings
 
