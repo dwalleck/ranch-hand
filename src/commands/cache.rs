@@ -124,10 +124,14 @@ fn scan_cache_versions(cache_dir: &Path) -> Result<(Vec<CachedVersion>, u64)> {
             continue;
         }
 
-        let version_name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
+        #[allow(clippy::single_match_else)] // match is clearer when both branches have logic
+        let version_name = match path.file_name() {
+            Some(name) => name.to_string_lossy().to_string(),
+            None => {
+                warn!("Invalid cache directory path: {}", path.display());
+                String::from("unknown")
+            }
+        };
 
         if version_name.starts_with('.') {
             continue;
@@ -440,7 +444,14 @@ async fn download_and_verify(
 
     // Verify immediately after download completes (concurrent with other downloads)
     let verification = result.as_ref().ok().map(|path| {
-        let actual_filename = path.file_name().unwrap_or_default().to_string_lossy();
+        #[allow(clippy::single_match_else)]
+        let actual_filename = match path.file_name() {
+            Some(name) => name.to_string_lossy(),
+            None => {
+                warn!("Downloaded file has invalid path: {}", path.display());
+                std::borrow::Cow::Borrowed("unknown")
+            }
+        };
         verify_file_from_checksums(path, checksums)
             .with_context(|| format!("Checksum verification failed for {actual_filename}"))
     });
@@ -459,10 +470,17 @@ fn process_download_results(results: Vec<DownloadResult>, cli: &Cli) -> Result<(
     for download in results {
         match download.result {
             Ok(downloaded_path) => {
-                let actual_filename = downloaded_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy();
+                #[allow(clippy::single_match_else)]
+                let actual_filename = match downloaded_path.file_name() {
+                    Some(name) => name.to_string_lossy(),
+                    None => {
+                        warn!(
+                            "Downloaded file has invalid path: {}",
+                            downloaded_path.display()
+                        );
+                        std::borrow::Cow::Borrowed("unknown")
+                    }
+                };
 
                 // Report verification result (verification already happened concurrently)
                 match &download.verification {
