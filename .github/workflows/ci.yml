@@ -8,8 +8,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # Keep in sync with rust-toolchain.toml
-  RUST_VERSION: "1.83.0"
 
 jobs:
   fmt:
@@ -18,11 +16,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      # Reads toolchain from rust-toolchain.toml automatically
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
-      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
 
   clippy:
@@ -31,11 +28,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
-      - uses: Swatinem/rust-cache@v2
       # Clippy treats warnings as errors in CI for stricter enforcement
       - run: cargo clippy -- -D warnings
 
@@ -49,10 +44,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo test
 
   build:
@@ -66,8 +58,5 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - run: cargo build --release

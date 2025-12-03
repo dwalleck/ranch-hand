@@ -17,8 +17,10 @@ set -e
 if command -v bd >/dev/null 2>&1; then
     if [ -d .beads ]; then
         echo "Flushing beads changes..."
-        if ! bd sync --flush-only >/dev/null 2>&1; then
+        # Capture output for debugging but continue on failure
+        if ! BD_OUTPUT=$(bd sync --flush-only 2>&1); then
             echo "Warning: bd sync --flush-only failed (continuing anyway)"
+            echo "  Output: $BD_OUTPUT"
         fi
     fi
 fi
@@ -27,11 +29,14 @@ fi
 echo "Running pre-commit checks..."
 
 echo "Checking formatting..."
-if ! cargo fmt --check; then
+# Get list of files that need formatting before running fmt
+UNFORMATTED=$(cargo fmt -- --check -l 2>/dev/null || true)
+if [ -n "$UNFORMATTED" ]; then
     echo ""
     echo "Auto-formatting code..."
     cargo fmt
-    git add -u  # Stage the formatted changes
+    # Only stage the files that were actually formatted (not all tracked changes)
+    echo "$UNFORMATTED" | xargs git add
     echo ""
     echo "Code has been formatted and staged. Proceeding with commit."
 fi
