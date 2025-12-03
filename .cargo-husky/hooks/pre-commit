@@ -20,7 +20,8 @@ if command -v bd >/dev/null 2>&1; then
         # Capture output for debugging but continue on failure
         if ! BD_OUTPUT=$(bd sync --flush-only 2>&1); then
             echo "Warning: bd sync --flush-only failed (continuing anyway)"
-            echo "  Output: $BD_OUTPUT"
+            # Truncate output to avoid exposing sensitive information
+            echo "  Output: $(printf '%.200s' "$BD_OUTPUT")..."
         fi
     fi
 fi
@@ -47,11 +48,10 @@ if [ -n "$STAGED_RS_FILES" ]; then
         echo "Auto-formatting staged Rust files..."
         # Format only the staged files
         echo "$STAGED_RS_FILES" | while IFS= read -r file; do
-            if [ -f "$file" ]; then
-                cargo fmt -- "$file"
-                git add "$file"
-            fi
+            [ -f "$file" ] && cargo fmt -- "$file"
         done
+        # Re-stage formatted files (using xargs avoids subshell variable issues)
+        echo "$STAGED_RS_FILES" | tr '\n' '\0' | xargs -0 git add
         echo ""
         echo "Staged files have been formatted and re-staged."
     fi
