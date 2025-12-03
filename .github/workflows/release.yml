@@ -1,0 +1,201 @@
+name: Release
+
+on:
+  push:
+    tags:
+      # Matches semver tags like v1.0.0, v1.2.3-beta.1, v2.0.0-rc.1
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: rh
+
+permissions:
+  contents: write
+
+jobs:
+  # First, run all checks to ensure the release is valid
+  check:
+    name: Pre-release Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --check
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+      - name: Run tests
+        run: cargo test
+
+  # Build binaries for each platform
+  build:
+    name: Build (${{ matrix.target }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          # Linux ARM64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          # macOS x86_64 (Intel)
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          # macOS ARM64 (Apple Silicon)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          # Windows x86_64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          # Windows ARM64 (native build on ARM64 runner)
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+            archive: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Install cross for cross-compilation (pinned to specific version for stability)
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --version 0.2.5
+
+      # Build with cross for cross-compilation targets
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      # Build natively for non-cross targets
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Smoke test the binary (skip for cross-compiled targets that can't run on host)
+      - name: Smoke test
+        if: ${{ !matrix.cross }}
+        shell: bash
+        run: |
+          if [[ "${{ matrix.os }}" == windows* ]]; then
+            ./target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe --version
+            ./target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe --help
+          else
+            ./target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} --version
+            ./target/${{ matrix.target }}/release/${{ env.BINARY_NAME }} --help
+          fi
+
+      # Package the binary (Unix)
+      - name: Package (Unix)
+        if: ${{ !startsWith(matrix.os, 'windows') }}
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czvf ../../../${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ env.BINARY_NAME }}
+          cd ../../..
+
+      # Package the binary (Windows)
+      - name: Package (Windows)
+        if: ${{ startsWith(matrix.os, 'windows') }}
+        shell: pwsh
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path ${{ env.BINARY_NAME }}.exe -DestinationPath ../../../${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.zip
+          cd ../../..
+
+      # Generate SHA256 checksum
+      - name: Generate checksum (Unix)
+        if: ${{ !startsWith(matrix.os, 'windows') }}
+        run: |
+          shasum -a 256 ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }} > ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}.sha256
+
+      - name: Generate checksum (Windows)
+        if: ${{ startsWith(matrix.os, 'windows') }}
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 "${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}").Hash.ToLower()
+          "$hash  ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}" | Out-File -Encoding ASCII "${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}.sha256"
+
+      # Upload artifacts
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.BINARY_NAME }}-${{ matrix.target }}
+          path: |
+            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+            ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}.sha256
+          if-no-files-found: error
+
+  # Create the GitHub release
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download all artifacts
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      # Validate artifact count (6 targets × 2 files each = 12 files)
+      - name: Validate artifacts
+        run: |
+          EXPECTED_COUNT=12
+          ACTUAL_COUNT=$(ls -1 artifacts/ | wc -l)
+          if [ "$ACTUAL_COUNT" -ne "$EXPECTED_COUNT" ]; then
+            echo "::error::Expected $EXPECTED_COUNT artifacts, found $ACTUAL_COUNT"
+            ls -la artifacts/
+            exit 1
+          fi
+          echo "✓ All $EXPECTED_COUNT artifacts present"
+
+      # Create combined checksums file
+      - name: Create checksums file
+        run: |
+          cd artifacts
+          cat *.sha256 > ../SHA256SUMS.txt
+          cd ..
+
+      # Create GitHub Release
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: |
+            artifacts/*
+            SHA256SUMS.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
