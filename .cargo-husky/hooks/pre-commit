@@ -36,7 +36,10 @@ if [ -n "$UNFORMATTED" ]; then
     echo "Auto-formatting code..."
     cargo fmt
     # Only stage the files that were actually formatted (not all tracked changes)
-    echo "$UNFORMATTED" | xargs git add
+    # Use while loop to safely handle paths with spaces or special characters
+    echo "$UNFORMATTED" | while IFS= read -r file; do
+        git add "$file"
+    done
     echo ""
     echo "Code has been formatted and staged. Proceeding with commit."
 fi
