@@ -31,7 +31,12 @@ pub struct Cli {
     pub timeout: u64,
 
     /// Timeout for file downloads in seconds (default: 600)
-    #[arg(long, global = true, env = "RH_DOWNLOAD_TIMEOUT", default_value = "600")]
+    #[arg(
+        long,
+        global = true,
+        env = "RH_DOWNLOAD_TIMEOUT",
+        default_value = "600"
+    )]
     pub download_timeout: u64,
 
     #[command(subcommand)]

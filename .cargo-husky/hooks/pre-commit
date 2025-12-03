@@ -1,0 +1,75 @@
+#!/bin/sh
+# Pre-commit hook for ranch-hand
+# Runs beads flush, formatting, and linting before allowing commits
+#
+# To bypass hooks for work-in-progress commits:
+#   git commit --no-verify -m "WIP: ..."
+#
+# To run with tests (slower):
+#   RH_PRE_COMMIT_TEST=1 git commit -m "..."
+
+set -e
+
+# --- Beads flush (from beads pre-commit hook) ---
+# This ensures that any pending bd issue changes are flushed to
+# .beads/issues.jsonl before the commit is created
+
+if command -v bd >/dev/null 2>&1; then
+    if [ -d .beads ]; then
+        echo "Flushing beads changes..."
+        # Capture output for debugging but continue on failure
+        if ! BD_OUTPUT=$(bd sync --flush-only 2>&1); then
+            echo "Warning: bd sync --flush-only failed (continuing anyway)"
+            # Truncate output to avoid exposing sensitive information
+            echo "  Output: $(printf '%.200s' "$BD_OUTPUT")..."
+        fi
+    fi
+fi
+
+# --- Cargo checks ---
+echo "Running pre-commit checks..."
+
+# Get list of staged Rust files only (not all files in the repo)
+STAGED_RS_FILES=$(git diff --cached --name-only --diff-filter=ACMR | grep '\.rs$' || true)
+
+if [ -n "$STAGED_RS_FILES" ]; then
+    echo "Checking formatting of staged files..."
+    # Check if any staged files need formatting
+    NEEDS_FORMAT=false
+    for file in $STAGED_RS_FILES; do
+        if [ -f "$file" ] && ! cargo fmt -- --check "$file" >/dev/null 2>&1; then
+            NEEDS_FORMAT=true
+            break
+        fi
+    done
+
+    if [ "$NEEDS_FORMAT" = true ]; then
+        echo ""
+        echo "Auto-formatting staged Rust files..."
+        # Format only the staged files
+        echo "$STAGED_RS_FILES" | while IFS= read -r file; do
+            [ -f "$file" ] && cargo fmt -- "$file"
+        done
+        # Re-stage formatted files (using xargs avoids subshell variable issues)
+        echo "$STAGED_RS_FILES" | tr '\n' '\0' | xargs -0 git add
+        echo ""
+        echo "Staged files have been formatted and re-staged."
+    fi
+else
+    echo "No staged Rust files to check."
+fi
+
+# Clippy treats warnings as errors in pre-commit for stricter enforcement
+# (matches CI behavior, while regular cargo build keeps them as warnings)
+# Run after formatting to ensure formatted code also passes
+echo "Running clippy..."
+cargo clippy -- -D warnings
+
+# Tests are run in CI - skip locally for faster commits
+# Set RH_PRE_COMMIT_TEST=1 to run tests locally
+if [ "${RH_PRE_COMMIT_TEST:-}" = "1" ]; then
+    echo "Running tests..."
+    cargo test --quiet
+fi
+
+echo "All pre-commit checks passed!"

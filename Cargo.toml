@@ -40,12 +40,17 @@ winreg = "0.52"
 tempfile = "3"
 rstest = "0.26"
 
+[build-dependencies]
+cargo-husky = { version = "1", default-features = false, features = ["user-hooks"] }
+
 [lints.rust]
 unsafe_code = "forbid"
 
 [lints.clippy]
-all = "warn"
-pedantic = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow descriptive type names that include the module name
+module_name_repetitions = "allow"
 
 [profile.release]
 strip = true

@@ -308,7 +308,9 @@ mod tests {
     fn test_detect_corporate_proxy() {
         assert!(detect_corporate_proxy("self signed certificate in chain"));
         assert!(detect_corporate_proxy("SELF_SIGNED_CERT_IN_CHAIN"));
-        assert!(detect_corporate_proxy("unable to get local issuer certificate"));
+        assert!(detect_corporate_proxy(
+            "unable to get local issuer certificate"
+        ));
         assert!(!detect_corporate_proxy("connection refused"));
     }
 

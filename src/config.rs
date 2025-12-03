@@ -65,7 +65,8 @@ impl Default for RdEngineConfig {
 impl RdEngineConfig {
     /// Load configuration from rd-engine.json
     pub fn load() -> Result<Self, ConfigError> {
-        let path = paths::rd_engine_json_path().map_err(|e| ConfigError::ReadError(e.to_string()))?;
+        let path =
+            paths::rd_engine_json_path().map_err(|e| ConfigError::ReadError(e.to_string()))?;
         Self::load_from_path(&path)
     }
 
