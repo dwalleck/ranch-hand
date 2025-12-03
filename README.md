@@ -18,9 +18,10 @@ Download the latest release for your platform from the [Releases page](https://g
 
 **Linux/macOS:**
 ```bash
-# Download and extract (example for Linux x64)
-curl -LO https://github.com/dwalleck/ranch-hand/releases/latest/download/rh-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
-tar -xzf rh-v0.1.0-x86_64-unknown-linux-gnu.tar.gz
+# Download and extract (replace VERSION with the release version, e.g., v0.1.0)
+VERSION=v0.1.0
+curl -LO "https://github.com/dwalleck/ranch-hand/releases/download/${VERSION}/rh-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+tar -xzf "rh-${VERSION}-x86_64-unknown-linux-gnu.tar.gz"
 sudo mv rh /usr/local/bin/
 
 # Verify installation
@@ -32,7 +33,7 @@ Download the `.zip` file, extract `rh.exe`, and add it to your PATH.
 
 ### From Source
 
-Requires Rust 1.70 or later.
+Requires Rust 1.83.0 or later.
 
 ```bash
 git clone https://github.com/dwalleck/ranch-hand.git
@@ -156,15 +157,28 @@ Tags containing a hyphen (e.g., `v0.2.0-beta.1`, `v0.2.0-rc.1`) are automaticall
 
 ### Verifying Downloads
 
-Each release includes SHA256 checksums. To verify a download:
+Each release includes SHA256 checksums in two formats:
+- Individual `.sha256` files for each artifact
+- A combined `SHA256SUMS.txt` file containing all checksums
+
+To verify a download:
 
 ```bash
-# Download the binary and checksum
-curl -LO https://github.com/dwalleck/ranch-hand/releases/download/v0.2.0/rh-v0.2.0-x86_64-unknown-linux-gnu.tar.gz
-curl -LO https://github.com/dwalleck/ranch-hand/releases/download/v0.2.0/SHA256SUMS.txt
+# Set the version you downloaded
+VERSION=v0.2.0
 
-# Verify
+# Download the combined checksums file
+curl -LO "https://github.com/dwalleck/ranch-hand/releases/download/${VERSION}/SHA256SUMS.txt"
+
+# Verify your downloaded file
 sha256sum -c SHA256SUMS.txt --ignore-missing
+```
+
+Or verify using the individual checksum file:
+
+```bash
+curl -LO "https://github.com/dwalleck/ranch-hand/releases/download/${VERSION}/rh-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
+sha256sum -c "rh-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256"
 ```
 
 ## License
