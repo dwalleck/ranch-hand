@@ -20,6 +20,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: rustfmt
+      - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
 
   clippy:
@@ -31,6 +32,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+      - uses: Swatinem/rust-cache@v2
       # Clippy treats warnings as errors in CI for stricter enforcement
       - run: cargo clippy -- -D warnings
 
@@ -45,6 +47,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
       - run: cargo test
 
   build:
@@ -59,4 +62,5 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
