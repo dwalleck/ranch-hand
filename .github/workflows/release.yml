@@ -80,10 +80,10 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      # Install cross for cross-compilation (pinned to specific version for stability)
+      # Install cross for cross-compilation (using --locked to use exact dependency versions)
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --version 0.2.5
+        run: cargo install cross --version 0.2.5 --locked
 
       # Build with cross for cross-compilation targets
       - name: Build (cross)

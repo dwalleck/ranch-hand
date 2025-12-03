@@ -33,7 +33,7 @@ Download the `.zip` file, extract `rh.exe`, and add it to your PATH.
 
 ### From Source
 
-Requires Rust 1.85.0 or later.
+Requires Rust 1.91.1 or later.
 
 ```bash
 git clone https://github.com/dwalleck/ranch-hand.git
