@@ -3,6 +3,7 @@ mod client;
 mod commands;
 mod config;
 mod paths;
+mod utils;
 
 use anyhow::Result;
 use clap::Parser;

@@ -110,6 +110,7 @@ pub enum CacheCommands {
     List,
 
     /// Download k3s files to local cache
+    #[command(disable_version_flag = true)]
     Populate {
         /// k3s version to download (e.g., v1.33.3+k3s1)
         version: String,

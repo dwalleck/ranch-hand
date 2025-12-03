@@ -1,6 +1,4 @@
-// This module provides path resolution infrastructure that will be used by command implementations.
-// Allow dead_code during infrastructure phase - will be removed when commands are implemented.
-#![allow(dead_code)]
+//! Path resolution for Rancher Desktop files and directories.
 
 use std::path::PathBuf;
 use thiserror::Error;
@@ -82,6 +80,7 @@ pub fn rd_engine_json_path() -> Result<PathBuf, PathError> {
 /// - Windows: %LOCALAPPDATA%\rancher-desktop
 /// - macOS: ~/Library/Application Support/rancher-desktop
 /// - Linux: ~/.local/share/rancher-desktop
+#[allow(dead_code)] // Will be used by future commands
 pub fn rancher_desktop_data_dir() -> Result<PathBuf, PathError> {
     #[cfg(target_os = "macos")]
     {
