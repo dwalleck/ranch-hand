@@ -372,14 +372,14 @@ async fn check_api_connectivity(cli: &Cli, show_progress: bool) -> Vec<CheckResu
     };
 
     // Check backend state via /v1/backend_state
-    let backend_check = check_backend_state(&client, &config, cli.timeout).await;
+    let backend_check = check_backend_state(&client, &config).await;
     if show_progress {
         print_check_result(&backend_check);
     }
     results.push(backend_check);
 
     // Check version info
-    let version_check = check_version_info(&client, &config, cli.timeout).await;
+    let version_check = check_version_info(&client, &config).await;
     if show_progress {
         print_check_result(&version_check);
     }
@@ -392,16 +392,12 @@ async fn check_api_connectivity(cli: &Cli, show_progress: bool) -> Vec<CheckResu
     results
 }
 
-async fn check_backend_state(
-    client: &reqwest::Client,
-    config: &RdEngineConfig,
-    timeout: u64,
-) -> CheckResult {
+async fn check_backend_state(client: &reqwest::Client, config: &RdEngineConfig) -> CheckResult {
     let url = config.api_url("/v1/backend_state");
+    // Note: timeout is already configured on the client via HttpClientConfig
     match client
         .get(&url)
         .header("Authorization", config.basic_auth())
-        .timeout(Duration::from_secs(timeout))
         .send()
         .await
     {
@@ -428,16 +424,12 @@ async fn check_backend_state(
     }
 }
 
-async fn check_version_info(
-    client: &reqwest::Client,
-    config: &RdEngineConfig,
-    timeout: u64,
-) -> CheckResult {
+async fn check_version_info(client: &reqwest::Client, config: &RdEngineConfig) -> CheckResult {
     let url = config.api_url("/v1/settings");
+    // Note: timeout is already configured on the client via HttpClientConfig
     match client
         .get(&url)
         .header("Authorization", config.basic_auth())
-        .timeout(Duration::from_secs(timeout))
         .send()
         .await
     {
@@ -538,30 +530,34 @@ fn check_cache_status(show_progress: bool) -> Vec<CheckResult> {
 
 /// Check network connectivity to required domains
 async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<CheckResult> {
-    let mut results = Vec::new();
-
     if show_progress {
         print_category_header("Network Connectivity");
     }
 
     let domains = ["github.com", "storage.googleapis.com"];
 
-    for domain in domains {
-        let check = check_https_connectivity(domain, cli).await;
-        if show_progress {
-            print_check_result(&check);
-        }
-        results.push(check);
-    }
+    // Run HTTPS checks and DNS check concurrently for better performance
+    let https_futures: Vec<_> = domains
+        .iter()
+        .map(|domain| check_https_connectivity(domain, cli))
+        .collect();
 
-    // DNS check
-    let dns_check = check_dns_resolution("github.com").await;
+    let dns_future = check_dns_resolution("github.com");
+
+    let (https_results, dns_check) =
+        tokio::join!(futures_util::future::join_all(https_futures), dns_future);
+
+    let mut results: Vec<CheckResult> = https_results;
+
     if show_progress {
+        for result in &results {
+            print_check_result(result);
+        }
         print_check_result(&dns_check);
         println!();
     }
-    results.push(dns_check);
 
+    results.push(dns_check);
     results
 }
 
@@ -606,11 +602,14 @@ async fn check_https_connectivity(domain: &str, cli: &Cli) -> CheckResult {
     }
 }
 
+/// Timeout for DNS resolution checks
+const DNS_RESOLUTION_TIMEOUT_SECS: u64 = 5;
+
 async fn check_dns_resolution(domain: &str) -> CheckResult {
     use std::net::ToSocketAddrs;
 
     let domain = domain.to_string();
-    let result = tokio::task::spawn_blocking(move || {
+    let dns_future = tokio::task::spawn_blocking(move || {
         let addr = format!("{domain}:443");
         match addr.to_socket_addrs() {
             Ok(mut addrs) => {
@@ -623,10 +622,13 @@ async fn check_dns_resolution(domain: &str) -> CheckResult {
             Err(e) => CheckResult::fail("DNS Resolution", format!("Failed to resolve {domain}"))
                 .with_details(e.to_string()),
         }
-    })
-    .await;
+    });
 
-    result.unwrap_or_else(|_| CheckResult::fail("DNS Resolution", "DNS check task panicked"))
+    match tokio::time::timeout(Duration::from_secs(DNS_RESOLUTION_TIMEOUT_SECS), dns_future).await {
+        Ok(result) => result
+            .unwrap_or_else(|_| CheckResult::fail("DNS Resolution", "DNS check task panicked")),
+        Err(_) => CheckResult::fail("DNS Resolution", "DNS resolution timed out"),
+    }
 }
 
 /// Platform-specific checks
@@ -725,5 +727,63 @@ fn check_windows_wsl() -> CheckResult {
             }
         }
         Err(_) => CheckResult::warn("WSL", "Could not check WSL status"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_result_ok() {
+        let result = CheckResult::ok("Test", "Everything is fine");
+        assert_eq!(result.name, "Test");
+        assert_eq!(result.status, CheckStatus::Ok);
+        assert_eq!(result.message, "Everything is fine");
+        assert!(result.details.is_none());
+    }
+
+    #[test]
+    fn test_check_result_warn() {
+        let result = CheckResult::warn("Test", "Minor issue");
+        assert_eq!(result.status, CheckStatus::Warn);
+    }
+
+    #[test]
+    fn test_check_result_fail() {
+        let result = CheckResult::fail("Test", "Critical error");
+        assert_eq!(result.status, CheckStatus::Fail);
+    }
+
+    #[test]
+    fn test_check_result_skip() {
+        let result = CheckResult::skip("Test", "Skipped check");
+        assert_eq!(result.status, CheckStatus::Skip);
+    }
+
+    #[test]
+    fn test_check_result_with_details() {
+        let result = CheckResult::ok("Test", "Message").with_details("Extra info");
+        assert_eq!(result.details, Some("Extra info".to_string()));
+    }
+
+    #[test]
+    fn test_check_status_equality() {
+        assert_eq!(CheckStatus::Ok, CheckStatus::Ok);
+        assert_ne!(CheckStatus::Ok, CheckStatus::Fail);
+    }
+
+    #[test]
+    fn test_diagnose_summary_counts() {
+        let summary = DiagnoseSummary {
+            ok: 5,
+            warn: 2,
+            fail: 1,
+            skip: 0,
+        };
+        assert_eq!(summary.ok, 5);
+        assert_eq!(summary.warn, 2);
+        assert_eq!(summary.fail, 1);
+        assert_eq!(summary.skip, 0);
     }
 }

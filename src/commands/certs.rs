@@ -90,22 +90,23 @@ pub async fn check(cli: &Cli) -> Result<()> {
         println!();
     }
 
-    let mut results = Vec::new();
-    let mut any_proxy_detected = false;
+    // Check all domains concurrently for better performance
+    let futures: Vec<_> = REQUIRED_DOMAINS
+        .iter()
+        .map(|domain| {
+            debug!("Checking domain: {}", domain);
+            check_domain(domain, cli.insecure)
+        })
+        .collect();
 
-    for domain in REQUIRED_DOMAINS {
-        debug!("Checking domain: {}", domain);
-        let result = check_domain(domain, cli.insecure).await;
+    let results = futures_util::future::join_all(futures).await;
 
-        if result.proxy_detected {
-            any_proxy_detected = true;
+    let any_proxy_detected = results.iter().any(|r| r.proxy_detected);
+
+    if show_progress {
+        for result in &results {
+            print_domain_result(result);
         }
-
-        if show_progress {
-            print_domain_result(&result);
-        }
-
-        results.push(result);
     }
 
     let all_ok = results.iter().all(|r| r.success);
@@ -429,5 +430,95 @@ impl rustls::client::danger::ServerCertVerifier for NoVerifier {
             rustls::SignatureScheme::RSA_PSS_SHA512,
             rustls::SignatureScheme::ED25519,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_success_result(domain: &str, proxy: bool) -> CertCheckResult {
+        CertCheckResult {
+            domain: domain.to_string(),
+            success: true,
+            error: None,
+            certificate: Some(CertificateInfo {
+                subject: "example.com".to_string(),
+                issuer: if proxy {
+                    "Zscaler Inc".to_string()
+                } else {
+                    "DigiCert".to_string()
+                },
+                not_before: Some("2024-01-01".to_string()),
+                not_after: Some("2025-01-01".to_string()),
+                chain_length: 3,
+            }),
+            proxy_detected: proxy,
+        }
+    }
+
+    fn make_failure_result(domain: &str) -> CertCheckResult {
+        CertCheckResult {
+            domain: domain.to_string(),
+            success: false,
+            error: Some("Connection failed".to_string()),
+            certificate: None,
+            proxy_detected: false,
+        }
+    }
+
+    #[test]
+    fn test_generate_recommendations_all_ok() {
+        let results = vec![
+            make_success_result("github.com", false),
+            make_success_result("api.github.com", false),
+        ];
+        let recommendations = generate_recommendations(&results, false);
+        assert!(recommendations.is_empty());
+    }
+
+    #[test]
+    fn test_generate_recommendations_with_failures() {
+        let results = vec![
+            make_success_result("github.com", false),
+            make_failure_result("api.github.com"),
+        ];
+        let recommendations = generate_recommendations(&results, false);
+        assert!(!recommendations.is_empty());
+        assert!(recommendations
+            .iter()
+            .any(|r| r.contains("1 domain(s) failed")));
+    }
+
+    #[test]
+    fn test_generate_recommendations_with_proxy() {
+        let results = vec![
+            make_success_result("github.com", true),
+            make_success_result("api.github.com", true),
+        ];
+        let recommendations = generate_recommendations(&results, true);
+        assert!(!recommendations.is_empty());
+        assert!(recommendations.iter().any(|r| r.contains("IT department")));
+    }
+
+    #[test]
+    fn test_cert_check_result_serialization() {
+        let result = make_success_result("github.com", false);
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("github.com"));
+        assert!(json.contains("DigiCert"));
+    }
+
+    #[test]
+    fn test_certs_check_output_serialization() {
+        let output = CertsCheckOutput {
+            results: vec![make_success_result("github.com", false)],
+            all_ok: true,
+            proxy_detected: false,
+            recommendations: vec![],
+        };
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(json.contains("all_ok"));
+        assert!(json.contains("true"));
     }
 }
