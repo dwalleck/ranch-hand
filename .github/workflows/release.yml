@@ -63,11 +63,10 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-          # Windows ARM64 (cross-compiled from x64, can't run smoke test)
+          # Windows ARM64 (native build on ARM64 runner)
           - target: aarch64-pc-windows-msvc
-            os: windows-latest
+            os: windows-11-arm
             archive: zip
-            skip_smoke_test: true
 
     steps:
       - uses: actions/checkout@v4
@@ -98,10 +97,10 @@ jobs:
 
       # Smoke test the binary (skip for cross-compiled targets that can't run on host)
       - name: Smoke test
-        if: ${{ !matrix.cross && !matrix.skip_smoke_test }}
+        if: ${{ !matrix.cross }}
         shell: bash
         run: |
-          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+          if [[ "${{ matrix.os }}" == windows* ]]; then
             ./target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe --version
             ./target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}.exe --help
           else
@@ -111,7 +110,7 @@ jobs:
 
       # Package the binary (Unix)
       - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
+        if: ${{ !startsWith(matrix.os, 'windows') }}
         run: |
           cd target/${{ matrix.target }}/release
           tar -czvf ../../../${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ env.BINARY_NAME }}
@@ -119,7 +118,7 @@ jobs:
 
       # Package the binary (Windows)
       - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
+        if: ${{ startsWith(matrix.os, 'windows') }}
         shell: pwsh
         run: |
           cd target/${{ matrix.target }}/release
@@ -128,12 +127,12 @@ jobs:
 
       # Generate SHA256 checksum
       - name: Generate checksum (Unix)
-        if: matrix.os != 'windows-latest'
+        if: ${{ !startsWith(matrix.os, 'windows') }}
         run: |
           shasum -a 256 ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }} > ${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}.sha256
 
       - name: Generate checksum (Windows)
-        if: matrix.os == 'windows-latest'
+        if: ${{ startsWith(matrix.os, 'windows') }}
         shell: pwsh
         run: |
           $hash = (Get-FileHash -Algorithm SHA256 "${{ env.BINARY_NAME }}-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}").Hash.ToLower()
