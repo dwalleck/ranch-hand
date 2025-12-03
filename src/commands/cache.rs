@@ -3,17 +3,17 @@
 use crate::cli::Cli;
 use crate::client::http::HttpClientConfig;
 use crate::paths::{arch_string, k3s_binary_name, k3s_cache_dir, k3s_version_cache_dir};
-use crate::utils::checksum::{parse_checksum_file, verify_file_from_checksums};
-use crate::utils::download::DownloadManager;
+use crate::utils::checksum::{parse_checksum_file, verify_file_from_checksums, ChecksumError};
+use crate::utils::download::{
+    check_existing_file, cleanup_partial_download, stream_to_file, DownloadManager,
+};
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
-use futures_util::StreamExt;
 use indicatif::ProgressBar;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tokio::io::AsyncWriteExt;
 use tracing::{debug, info, warn};
 
 /// k3s release base URL
@@ -194,12 +194,24 @@ fn create_cached_file_entry(
     let metadata = fs::metadata(file_path)?;
     let size = metadata.len();
 
-    let verified = checksums.and_then(|cs| {
-        verify_file_from_checksums(file_path, cs)
-            .map(|()| true)
-            .ok()
-            .or(Some(false))
-    });
+    let verified = match checksums {
+        Some(cs) => match verify_file_from_checksums(file_path, cs) {
+            Ok(()) => Some(true),
+            Err(e) => {
+                // Only report false for actual checksum mismatches
+                // For other errors (file not in checksums, I/O errors), return None
+                if e.downcast_ref::<ChecksumError>()
+                    .is_some_and(|ce| matches!(ce, ChecksumError::Mismatch { .. }))
+                {
+                    Some(false)
+                } else {
+                    debug!("Could not verify {}: {}", filename, e);
+                    None
+                }
+            }
+        },
+        None => None,
+    };
 
     Ok((
         CachedFile {
@@ -373,20 +385,17 @@ async fn download_remaining_files(
 
         match download_result {
             Ok(downloaded_path) => {
+                let actual_filename = downloaded_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy();
+
                 if let Some(pb) = &pb {
-                    DownloadManager::finish_success(
-                        pb,
-                        downloaded_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .as_ref(),
-                    );
+                    DownloadManager::finish_success(pb, actual_filename.as_ref());
                 }
 
-                if *file_type != "images" {
-                    verify_downloaded_file(cli, &downloaded_path, filename, checksums);
-                }
+                // Verify all downloaded files against checksums
+                verify_downloaded_file(cli, &downloaded_path, actual_filename.as_ref(), checksums);
             }
             Err(e) => {
                 if let Some(pb) = pb {
@@ -485,55 +494,13 @@ async fn download_with_progress(
         }
     }
 
-    stream_to_file(response, path, progress).await?;
+    // Stream to file, cleaning up partial file on error
+    if let Err(e) = stream_to_file(response, path, progress).await {
+        cleanup_partial_download(path);
+        return Err(e);
+    }
+
     Ok(path.to_path_buf())
-}
-
-fn check_existing_file(path: &Path, progress: Option<&ProgressBar>) -> Option<PathBuf> {
-    if path.exists() {
-        if let Ok(metadata) = fs::metadata(path) {
-            if metadata.len() > 0 {
-                info!("File already exists, skipping: {}", path.display());
-                if let Some(pb) = progress {
-                    pb.set_length(metadata.len());
-                    pb.set_position(metadata.len());
-                }
-                return Some(path.to_path_buf());
-            }
-        }
-    }
-    None
-}
-
-async fn stream_to_file(
-    response: reqwest::Response,
-    path: &Path,
-    progress: Option<&ProgressBar>,
-) -> Result<()> {
-    let mut file = tokio::fs::File::create(path)
-        .await
-        .with_context(|| format!("Failed to create file: {}", path.display()))?;
-
-    let mut stream = response.bytes_stream();
-    let mut downloaded: u64 = 0;
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.with_context(|| format!("Error downloading to {}", path.display()))?;
-        file.write_all(&chunk)
-            .await
-            .with_context(|| format!("Failed to write to {}", path.display()))?;
-
-        downloaded += chunk.len() as u64;
-        if let Some(pb) = progress {
-            pb.set_position(downloaded);
-        }
-    }
-
-    file.flush()
-        .await
-        .with_context(|| format!("Failed to flush {}", path.display()))?;
-
-    Ok(())
 }
 
 async fn download_images_with_fallback(
@@ -569,7 +536,7 @@ async fn download_images_with_fallback(
             Err(e) => {
                 debug!("Failed to download {}: {}", filename, e);
                 last_error = Some(e);
-                let _ = fs::remove_file(&file_path);
+                cleanup_partial_download(&file_path);
             }
         }
     }

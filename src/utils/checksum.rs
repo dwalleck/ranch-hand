@@ -23,8 +23,9 @@ pub enum ChecksumError {
 
 /// Parse a sha256sum file into a map of filename -> hash.
 ///
-/// Format: `<hash>  <filename>` (two spaces between hash and filename)
-/// or `<hash> <filename>` (one space)
+/// Standard sha256sum format uses two spaces between hash and filename,
+/// but this parser handles both single and double spaces by splitting on
+/// the first space and trimming whitespace from the filename.
 pub fn parse_checksum_file(content: &str) -> Result<HashMap<String, String>> {
     let mut checksums = HashMap::new();
 
@@ -34,7 +35,7 @@ pub fn parse_checksum_file(content: &str) -> Result<HashMap<String, String>> {
             continue;
         }
 
-        // Handle both single and double space separators
+        // Split on first space; extra leading spaces on filename are trimmed below
         let parts: Vec<&str> = line.splitn(2, ' ').collect();
         if parts.len() != 2 {
             return Err(ChecksumError::InvalidFormat(format!(
@@ -65,7 +66,7 @@ pub fn calculate_file_hash(path: &Path) -> Result<String> {
         std::fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
 
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 8192];
+    let mut buffer = [0u8; 65536]; // 64KB buffer for better performance on large files
 
     loop {
         let bytes_read = file

@@ -1,119 +1,14 @@
-//! File download utilities with progress display.
-//!
-//! Note: Some functions here are utilities for future use and not currently called.
-
-#![allow(dead_code)]
+//! Download progress display utilities.
 
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use reqwest::Client;
-use std::path::Path;
-use tokio::fs::File;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
+use tracing::{debug, info};
 
-/// Style for download progress bars
-fn download_progress_style() -> ProgressStyle {
-    ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-        .expect("Invalid progress template")
-        .progress_chars("#>-")
-}
-
-/// Style for spinner when size is unknown
-fn spinner_style() -> ProgressStyle {
-    ProgressStyle::default_spinner()
-        .template("{spinner:.green} [{elapsed_precise}] {bytes} ({bytes_per_sec})")
-        .expect("Invalid spinner template")
-}
-
-/// Download a file with progress display.
-///
-/// Returns the number of bytes downloaded.
-pub async fn download_file(
-    client: &Client,
-    url: &str,
-    output_path: &Path,
-    progress: Option<&ProgressBar>,
-) -> Result<u64> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .with_context(|| format!("Failed to request {url}"))?
-        .error_for_status()
-        .with_context(|| format!("HTTP error for {url}"))?;
-
-    let total_size = response.content_length();
-
-    // Set up progress bar
-    if let Some(pb) = progress {
-        if let Some(size) = total_size {
-            pb.set_length(size);
-            pb.set_style(download_progress_style());
-        } else {
-            pb.set_style(spinner_style());
-        }
-    }
-
-    // Create parent directories if needed
-    if let Some(parent) = output_path.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-    }
-
-    // Download with streaming
-    let mut file = File::create(output_path)
-        .await
-        .with_context(|| format!("Failed to create {}", output_path.display()))?;
-
-    let mut stream = response.bytes_stream();
-    let mut downloaded: u64 = 0;
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.with_context(|| format!("Error downloading {url}"))?;
-        file.write_all(&chunk)
-            .await
-            .with_context(|| format!("Failed to write to {}", output_path.display()))?;
-
-        downloaded += chunk.len() as u64;
-        if let Some(pb) = progress {
-            pb.set_position(downloaded);
-        }
-    }
-
-    file.flush()
-        .await
-        .with_context(|| format!("Failed to flush {}", output_path.display()))?;
-
-    if let Some(pb) = progress {
-        pb.finish_with_message("done");
-    }
-
-    Ok(downloaded)
-}
-
-/// Download a file with a new progress bar showing the filename.
-pub async fn download_file_with_progress(
-    client: &Client,
-    url: &str,
-    output_path: &Path,
-    display_name: &str,
-) -> Result<u64> {
-    let pb = ProgressBar::new(0);
-    pb.set_message(display_name.to_string());
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{msg}: {spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")
-            .expect("Invalid progress template")
-            .progress_chars("#>-"),
-    );
-
-    download_file(client, url, output_path, Some(&pb)).await
-}
-
-/// Context for managing multiple concurrent downloads.
+/// Context for managing multiple concurrent downloads with progress bars.
 pub struct DownloadManager {
     multi_progress: MultiProgress,
 }
@@ -167,6 +62,72 @@ impl Default for DownloadManager {
     }
 }
 
+/// Check if a file already exists with non-zero size.
+///
+/// If the file exists, updates the progress bar to show completion and returns the path.
+/// Returns None if the file doesn't exist or is empty.
+pub fn check_existing_file(path: &Path, progress: Option<&ProgressBar>) -> Option<PathBuf> {
+    if path.exists() {
+        if let Ok(metadata) = fs::metadata(path) {
+            if metadata.len() > 0 {
+                info!("File already exists, skipping: {}", path.display());
+                if let Some(pb) = progress {
+                    pb.set_length(metadata.len());
+                    pb.set_position(metadata.len());
+                }
+                return Some(path.to_path_buf());
+            }
+        }
+    }
+    None
+}
+
+/// Stream a response body to a file with progress tracking.
+///
+/// This function streams the response data to the file in chunks,
+/// updating the progress bar as data is written.
+pub async fn stream_to_file(
+    response: reqwest::Response,
+    path: &Path,
+    progress: Option<&ProgressBar>,
+) -> Result<()> {
+    let mut file = tokio::fs::File::create(path)
+        .await
+        .with_context(|| format!("Failed to create file: {}", path.display()))?;
+
+    let mut stream = response.bytes_stream();
+    let mut downloaded: u64 = 0;
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.with_context(|| format!("Error downloading to {}", path.display()))?;
+        file.write_all(&chunk)
+            .await
+            .with_context(|| format!("Failed to write to {}", path.display()))?;
+
+        downloaded += chunk.len() as u64;
+        if let Some(pb) = progress {
+            pb.set_position(downloaded);
+        }
+    }
+
+    file.flush()
+        .await
+        .with_context(|| format!("Failed to flush {}", path.display()))?;
+
+    Ok(())
+}
+
+/// Clean up a partial download file, logging any errors.
+pub fn cleanup_partial_download(path: &Path) {
+    if let Err(cleanup_err) = fs::remove_file(path) {
+        debug!(
+            "Failed to clean up partial download {}: {}",
+            path.display(),
+            cleanup_err
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +137,11 @@ mod tests {
         let manager = DownloadManager::new();
         let pb = manager.add_download("test-file.tar.gz");
         assert_eq!(pb.message(), "test-file.tar.gz");
+    }
+
+    #[test]
+    fn test_check_existing_file_not_found() {
+        let result = check_existing_file(Path::new("/nonexistent/file"), None);
+        assert!(result.is_none());
     }
 }
