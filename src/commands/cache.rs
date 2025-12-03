@@ -124,7 +124,7 @@ fn scan_cache_versions(cache_dir: &Path) -> Result<(Vec<CachedVersion>, u64)> {
         }
 
         let (files, version_size, complete) = scan_version_files(&path)?;
-        total_size += version_size;
+        total_size = total_size.saturating_add(version_size);
 
         versions.push(CachedVersion {
             version: version_name,
@@ -158,7 +158,7 @@ fn scan_version_files(path: &Path) -> Result<(Vec<CachedFile>, u64, bool)> {
         if file_path.exists() {
             let (cached_file, size) =
                 create_cached_file_entry(&file_path, filename, checksums.as_ref())?;
-            total_size += size;
+            total_size = total_size.saturating_add(size);
             files.push(cached_file);
         } else {
             complete = false;
@@ -172,7 +172,7 @@ fn scan_version_files(path: &Path) -> Result<(Vec<CachedFile>, u64, bool)> {
             if !expected_files.iter().any(|(_, f)| f == &file_name) {
                 if let Ok(metadata) = dir_entry.metadata() {
                     if metadata.is_file() {
-                        total_size += metadata.len();
+                        total_size = total_size.saturating_add(metadata.len());
                         files.push(CachedFile {
                             name: file_name,
                             size: metadata.len(),

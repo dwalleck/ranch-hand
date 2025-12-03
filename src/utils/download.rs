@@ -6,7 +6,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, info};
+use tracing::{info, warn};
 
 /// Context for managing multiple concurrent downloads with progress bars.
 pub struct DownloadManager {
@@ -120,7 +120,7 @@ pub async fn stream_to_file(
 /// Clean up a partial download file, logging any errors.
 pub fn cleanup_partial_download(path: &Path) {
     if let Err(cleanup_err) = fs::remove_file(path) {
-        debug!(
+        warn!(
             "Failed to clean up partial download {}: {}",
             path.display(),
             cleanup_err

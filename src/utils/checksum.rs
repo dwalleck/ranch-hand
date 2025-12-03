@@ -7,6 +7,9 @@ use std::io::Read;
 use std::path::Path;
 use thiserror::Error;
 
+/// Buffer size for file hashing operations (64KB for better I/O performance on large files)
+const HASH_BUFFER_SIZE: usize = 65536;
+
 #[derive(Error, Debug)]
 pub enum ChecksumError {
     #[error("Checksum mismatch for {filename}: expected {expected}, got {actual}")]
@@ -66,7 +69,7 @@ pub fn calculate_file_hash(path: &Path) -> Result<String> {
         std::fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
 
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; 65536]; // 64KB buffer for better performance on large files
+    let mut buffer = [0u8; HASH_BUFFER_SIZE];
 
     loop {
         let bytes_read = file
