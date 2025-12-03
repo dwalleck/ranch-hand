@@ -370,6 +370,8 @@ struct DownloadResult {
     filename: String,
     progress_bar: Option<ProgressBar>,
     result: Result<PathBuf>,
+    /// Verification result: `Some(Ok(()))` = verified, `Some(Err(_))` = failed, `None` = not verified
+    verification: Option<Result<()>>,
 }
 
 async fn download_remaining_files(
@@ -396,19 +398,29 @@ async fn download_remaining_files(
         })
         .collect();
 
-    // Create futures for all downloads
+    // Create futures for all downloads (each will verify immediately after completing)
     let download_futures = downloads.into_iter().map(|(file_type, filename, pb)| {
-        download_single_file(file_type, filename, pb, version, version_dir, arch, cli)
+        download_and_verify(
+            file_type,
+            filename,
+            pb,
+            version,
+            version_dir,
+            arch,
+            cli,
+            checksums,
+        )
     });
 
-    // Run all downloads in parallel
+    // Run all downloads in parallel - verification happens concurrently as each completes
     let results = join_all(download_futures).await;
 
-    // Process results and collect errors
-    process_download_results(results, checksums, cli)
+    // Process and report results
+    process_download_results(results, cli)
 }
 
-async fn download_single_file(
+#[allow(clippy::too_many_arguments)] // All params needed for download + verification in one async task
+async fn download_and_verify(
     file_type: &'static str,
     filename: String,
     progress_bar: Option<ProgressBar>,
@@ -416,6 +428,7 @@ async fn download_single_file(
     version_dir: &Path,
     arch: &str,
     cli: &Cli,
+    checksums: &HashMap<String, String>,
 ) -> DownloadResult {
     let result = if file_type == "images" {
         download_images_with_fallback(version, version_dir, arch, progress_bar.as_ref(), cli).await
@@ -425,18 +438,22 @@ async fn download_single_file(
         download_with_progress(&url, &file_path, progress_bar.as_ref(), cli).await
     };
 
+    // Verify immediately after download completes (concurrent with other downloads)
+    let verification = result.as_ref().ok().map(|path| {
+        let actual_filename = path.file_name().unwrap_or_default().to_string_lossy();
+        verify_file_from_checksums(path, checksums)
+            .with_context(|| format!("Checksum verification failed for {actual_filename}"))
+    });
+
     DownloadResult {
         filename,
         progress_bar,
         result,
+        verification,
     }
 }
 
-fn process_download_results(
-    results: Vec<DownloadResult>,
-    checksums: &HashMap<String, String>,
-    cli: &Cli,
-) -> Result<()> {
+fn process_download_results(results: Vec<DownloadResult>, cli: &Cli) -> Result<()> {
     let mut errors = Vec::new();
 
     for download in results {
@@ -447,12 +464,37 @@ fn process_download_results(
                     .unwrap_or_default()
                     .to_string_lossy();
 
-                if let Some(pb) = &download.progress_bar {
-                    DownloadManager::finish_success(pb, actual_filename.as_ref());
+                // Report verification result (verification already happened concurrently)
+                match &download.verification {
+                    Some(Ok(())) => {
+                        debug!("Checksum verified for {}", actual_filename);
+                        if let Some(pb) = &download.progress_bar {
+                            DownloadManager::finish_success(pb, actual_filename.as_ref());
+                        }
+                    }
+                    Some(Err(e)) => {
+                        warn!(
+                            "Checksum verification failed for {}: {}",
+                            actual_filename, e
+                        );
+                        if !cli.quiet {
+                            println!(
+                                "  {} {}",
+                                "\u{26A0}".yellow(),
+                                format!("Checksum verification failed: {e}").yellow()
+                            );
+                        }
+                        if let Some(pb) = &download.progress_bar {
+                            DownloadManager::finish_success(pb, actual_filename.as_ref());
+                        }
+                    }
+                    None => {
+                        // No checksums available for this file
+                        if let Some(pb) = &download.progress_bar {
+                            DownloadManager::finish_success(pb, actual_filename.as_ref());
+                        }
+                    }
                 }
-
-                // Verify all downloaded files against checksums
-                verify_downloaded_file(cli, &downloaded_path, actual_filename.as_ref(), checksums);
             }
             Err(e) => {
                 if let Some(pb) = download.progress_bar {
@@ -471,26 +513,6 @@ fn process_download_results(
             errors.len(),
             errors.join("\n  ")
         ))
-    }
-}
-
-fn verify_downloaded_file(
-    cli: &Cli,
-    path: &Path,
-    filename: &str,
-    checksums: &HashMap<String, String>,
-) {
-    if let Err(e) = verify_file_from_checksums(path, checksums) {
-        warn!("Checksum verification failed for {}: {}", filename, e);
-        if !cli.quiet {
-            println!(
-                "  {} {}",
-                "\u{26A0}".yellow(),
-                format!("Checksum verification failed: {e}").yellow()
-            );
-        }
-    } else {
-        debug!("Checksum verified for {}", filename);
     }
 }
 
