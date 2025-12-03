@@ -295,8 +295,33 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Validate version string to prevent path traversal attacks.
+fn validate_version(version: &str) -> Result<()> {
+    if version.is_empty() {
+        return Err(anyhow!("Version cannot be empty"));
+    }
+
+    // Check for path traversal attempts
+    if version.contains('/') || version.contains('\\') || version.contains("..") {
+        return Err(anyhow!(
+            "Invalid version format: version cannot contain path separators or '..'"
+        ));
+    }
+
+    // Check for null bytes which can cause path handling issues
+    if version.contains('\0') {
+        return Err(anyhow!(
+            "Invalid version format: version cannot contain null bytes"
+        ));
+    }
+
+    Ok(())
+}
+
 /// Populate cache with k3s files for a specific version
 pub async fn populate(cli: &Cli, version: &str, force: bool) -> Result<()> {
+    validate_version(version)?;
+
     let arch = arch_string();
     let version_dir = k3s_version_cache_dir(version)?;
 
@@ -687,4 +712,50 @@ async fn download_images_with_fallback(
     }
 
     Err(last_error.unwrap_or_else(|| anyhow!("Failed to download airgap images")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_version_valid() {
+        assert!(validate_version("v1.28.3+k3s1").is_ok());
+        assert!(validate_version("v1.33.3+k3s1").is_ok());
+        assert!(validate_version("1.28.3").is_ok());
+    }
+
+    #[test]
+    fn test_validate_version_empty() {
+        let result = validate_version("");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn test_validate_version_path_traversal() {
+        // Forward slash
+        let result = validate_version("../../../etc/passwd");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("path separators"));
+
+        // Backslash
+        let result = validate_version("..\\..\\etc\\passwd");
+        assert!(result.is_err());
+
+        // Double dot without slashes
+        let result = validate_version("v1.28..3");
+        assert!(result.is_err());
+
+        // Just a slash
+        let result = validate_version("v1/28");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_validate_version_null_byte() {
+        let result = validate_version("v1.28.3\0");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("null bytes"));
+    }
 }
