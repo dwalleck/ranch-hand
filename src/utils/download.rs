@@ -117,14 +117,18 @@ pub async fn stream_to_file(
     Ok(())
 }
 
-/// Clean up a partial download file, logging any errors.
+/// Clean up a partial download file, logging errors (except `NotFound` which is expected).
 pub fn cleanup_partial_download(path: &Path) {
-    if let Err(cleanup_err) = fs::remove_file(path) {
-        warn!(
-            "Failed to clean up partial download {}: {}",
-            path.display(),
-            cleanup_err
-        );
+    if let Err(e) = fs::remove_file(path) {
+        // Don't warn if file doesn't exist - that's the expected case when cleanup
+        // is called but the file was never created or already removed
+        if e.kind() != std::io::ErrorKind::NotFound {
+            warn!(
+                "Failed to clean up partial download {}: {}",
+                path.display(),
+                e
+            );
+        }
     }
 }
 

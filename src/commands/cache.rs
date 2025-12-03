@@ -157,14 +157,11 @@ fn scan_version_files(path: &Path) -> Result<(Vec<CachedFile>, u64, bool)> {
     let mut total_size: u64 = 0;
     let mut complete = true;
 
+    // Read checksums file directly, avoiding TOCTOU race between exists() and read()
     let checksums_path = path.join(format!("sha256sum-{}.txt", arch_string()));
-    let checksums = if checksums_path.exists() {
-        fs::read_to_string(&checksums_path)
-            .ok()
-            .and_then(|content| parse_checksum_file(&content).ok())
-    } else {
-        None
-    };
+    let checksums = fs::read_to_string(&checksums_path)
+        .ok()
+        .and_then(|content| parse_checksum_file(&content).ok());
 
     let expected_files = get_download_files(arch_string());
     for (_, filename) in &expected_files {
