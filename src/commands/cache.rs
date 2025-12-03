@@ -29,28 +29,38 @@ fn get_download_files(arch: &str) -> Vec<(&'static str, String)> {
     ]
 }
 
-/// Status of a cached file
+/// Represents a cached k3s file with its verification status.
 #[derive(Debug, Clone, Serialize)]
 pub struct CachedFile {
+    /// Filename (e.g., "k3s", "k3s-airgap-images-amd64.tar.zst")
     pub name: String,
+    /// File size in bytes
     pub size: u64,
+    /// Checksum verification result: `Some(true)` = verified, `Some(false)` = mismatch, `None` = not checked
     pub verified: Option<bool>,
 }
 
-/// Status of a cached version
+/// Represents a cached k3s version directory with its files.
 #[derive(Debug, Clone, Serialize)]
 pub struct CachedVersion {
+    /// Version string (e.g., "v1.28.3+k3s1")
     pub version: String,
+    /// Full path to the version's cache directory
     pub path: PathBuf,
+    /// List of cached files in this version
     pub files: Vec<CachedFile>,
+    /// Whether all expected files are present
     pub complete: bool,
 }
 
-/// Cache list output
+/// Output structure for the cache list command.
 #[derive(Debug, Serialize)]
 pub struct CacheListOutput {
+    /// Path to the k3s cache directory
     pub cache_dir: PathBuf,
+    /// List of cached versions
     pub versions: Vec<CachedVersion>,
+    /// Total size of all cached files in bytes
     pub total_size: u64,
 }
 
