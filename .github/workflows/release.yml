@@ -63,10 +63,11 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             archive: zip
-          # Windows ARM64
+          # Windows ARM64 (cross-compiled from x64, can't run smoke test)
           - target: aarch64-pc-windows-msvc
             os: windows-latest
             archive: zip
+            skip_smoke_test: true
 
     steps:
       - uses: actions/checkout@v4
@@ -97,7 +98,7 @@ jobs:
 
       # Smoke test the binary (skip for cross-compiled targets that can't run on host)
       - name: Smoke test
-        if: ${{ !matrix.cross }}
+        if: ${{ !matrix.cross && !matrix.skip_smoke_test }}
         shell: bash
         run: |
           if [ "${{ matrix.os }}" == "windows-latest" ]; then
@@ -166,6 +167,18 @@ jobs:
 
       - name: List artifacts
         run: ls -la artifacts/
+
+      # Validate artifact count (6 targets × 2 files each = 12 files)
+      - name: Validate artifacts
+        run: |
+          EXPECTED_COUNT=12
+          ACTUAL_COUNT=$(ls -1 artifacts/ | wc -l)
+          if [ "$ACTUAL_COUNT" -ne "$EXPECTED_COUNT" ]; then
+            echo "::error::Expected $EXPECTED_COUNT artifacts, found $ACTUAL_COUNT"
+            ls -la artifacts/
+            exit 1
+          fi
+          echo "✓ All $EXPECTED_COUNT artifacts present"
 
       # Create combined checksums file
       - name: Create checksums file
