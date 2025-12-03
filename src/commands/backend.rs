@@ -175,7 +175,7 @@ async fn set_backend_state(cli: &Cli, target_state: &str, action: &str) -> Resul
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to set backend state: HTTP {} - {}", status, body);
+        anyhow::bail!("Failed to set backend state: HTTP {status} - {body}");
     }
 
     // Get the new state

@@ -69,7 +69,7 @@ pub fn calculate_file_hash(path: &Path) -> Result<String> {
         std::fs::File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
 
     let mut hasher = Sha256::new();
-    let mut buffer = [0u8; HASH_BUFFER_SIZE];
+    let mut buffer = vec![0u8; HASH_BUFFER_SIZE];
 
     loop {
         let bytes_read = file
@@ -150,7 +150,7 @@ mod tests {
     fn test_parse_checksum_file_with_binary_marker() {
         let content = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef *k3s";
         let checksums = parse_checksum_file(content).unwrap();
-        assert!(checksums.get("k3s").is_some());
+        assert!(checksums.contains_key("k3s"));
     }
 
     #[test]

@@ -151,7 +151,7 @@ pub async fn reset(cli: &Cli) -> Result<()> {
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to reset settings: HTTP {} - {}", status, body);
+        anyhow::bail!("Failed to reset settings: HTTP {status} - {body}");
     }
 
     if cli.json {
@@ -217,7 +217,7 @@ async fn put_settings(config: &RdEngineConfig, cli: &Cli, settings: &Value) -> R
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to update settings: HTTP {} - {}", status, body);
+        anyhow::bail!("Failed to update settings: HTTP {status} - {body}");
     }
 
     Ok(())
@@ -243,7 +243,7 @@ async fn propose_settings(config: &RdEngineConfig, cli: &Cli, settings: &Value) 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Failed to propose settings: HTTP {} - {}", status, body);
+        anyhow::bail!("Failed to propose settings: HTTP {status} - {body}");
     }
 
     response

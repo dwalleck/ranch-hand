@@ -91,7 +91,7 @@ pub async fn run(
 
     // Return error if status is not success
     if !status.is_success() {
-        anyhow::bail!("API request failed with status: {}", status);
+        anyhow::bail!("API request failed with status: {status}");
     }
 
     Ok(())
