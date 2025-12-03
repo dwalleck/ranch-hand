@@ -293,12 +293,14 @@ async fn check_application_status(cli: &Cli, show_progress: bool) -> Vec<CheckRe
 
 fn check_tcp_port(host: &str, port: u16) -> CheckResult {
     let addr = format!("{host}:{port}");
-    match TcpStream::connect_timeout(
-        &addr
-            .parse()
-            .unwrap_or_else(|_| format!("127.0.0.1:{port}").parse().unwrap()),
-        Duration::from_secs(5),
-    ) {
+    let socket_addr: std::net::SocketAddr = match addr.parse() {
+        Ok(addr) => addr,
+        Err(e) => {
+            return CheckResult::fail("API Port", format!("Invalid address: {addr}"))
+                .with_details(e.to_string())
+        }
+    };
+    match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(5)) {
         Ok(_) => CheckResult::ok("API Port", format!("Port {port} is accessible")),
         Err(e) => CheckResult::fail("API Port", format!("Cannot connect to port {port}"))
             .with_details(e.to_string()),
@@ -315,10 +317,10 @@ async fn check_http_api(config: &RdEngineConfig, cli: &Cli) -> CheckResult {
     };
 
     let url = config.api_url("/v1/settings");
+    // Note: timeout is already configured on the client via HttpClientConfig
     match client
         .get(&url)
         .header("Authorization", config.basic_auth())
-        .timeout(Duration::from_secs(cli.timeout))
         .send()
         .await
     {
@@ -553,7 +555,7 @@ async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<Check
     }
 
     // DNS check
-    let dns_check = check_dns_resolution("github.com");
+    let dns_check = check_dns_resolution("github.com").await;
     if show_progress {
         print_check_result(&dns_check);
         println!();
@@ -563,20 +565,19 @@ async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<Check
     results
 }
 
+/// Timeout for network connectivity checks
+const NETWORK_CHECK_TIMEOUT_SECS: u64 = 10;
+
 async fn check_https_connectivity(domain: &str, cli: &Cli) -> CheckResult {
-    let client_config = HttpClientConfig::with_timeout(cli.insecure, 10);
+    let client_config = HttpClientConfig::with_timeout(cli.insecure, NETWORK_CHECK_TIMEOUT_SECS);
     let client = match build_client(&client_config) {
         Ok(c) => c,
         Err(e) => return CheckResult::fail(domain, format!("Client error: {e}")),
     };
 
     let url = format!("https://{domain}");
-    match client
-        .head(&url)
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await
-    {
+    // Note: timeout is already configured on the client via HttpClientConfig
+    match client.head(&url).send().await {
         Ok(response) => {
             let status = response.status();
             if status.is_success() || status.is_redirection() {
@@ -605,21 +606,27 @@ async fn check_https_connectivity(domain: &str, cli: &Cli) -> CheckResult {
     }
 }
 
-fn check_dns_resolution(domain: &str) -> CheckResult {
+async fn check_dns_resolution(domain: &str) -> CheckResult {
     use std::net::ToSocketAddrs;
 
-    let addr = format!("{domain}:443");
-    match addr.to_socket_addrs() {
-        Ok(mut addrs) => {
-            if let Some(addr) = addrs.next() {
-                CheckResult::ok("DNS Resolution", format!("{domain} → {}", addr.ip()))
-            } else {
-                CheckResult::fail("DNS Resolution", format!("No addresses for {domain}"))
+    let domain = domain.to_string();
+    let result = tokio::task::spawn_blocking(move || {
+        let addr = format!("{domain}:443");
+        match addr.to_socket_addrs() {
+            Ok(mut addrs) => {
+                if let Some(addr) = addrs.next() {
+                    CheckResult::ok("DNS Resolution", format!("{domain} → {}", addr.ip()))
+                } else {
+                    CheckResult::fail("DNS Resolution", format!("No addresses for {domain}"))
+                }
             }
+            Err(e) => CheckResult::fail("DNS Resolution", format!("Failed to resolve {domain}"))
+                .with_details(e.to_string()),
         }
-        Err(e) => CheckResult::fail("DNS Resolution", format!("Failed to resolve {domain}"))
-            .with_details(e.to_string()),
-    }
+    })
+    .await;
+
+    result.unwrap_or_else(|_| CheckResult::fail("DNS Resolution", "DNS check task panicked"))
 }
 
 /// Platform-specific checks

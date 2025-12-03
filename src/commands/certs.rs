@@ -155,29 +155,18 @@ async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(Certificate
     // Install the ring crypto provider (ignore error if already installed)
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // Build TLS config
-    let root_store = if insecure {
-        // Empty root store - accept any certificate
-        rustls::RootCertStore::empty()
-    } else {
-        let mut store = rustls::RootCertStore::empty();
-        store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        store
-    };
-
-    let config = rustls::ClientConfig::builder()
-        .with_root_certificates(root_store)
-        .with_no_client_auth();
-
-    // If insecure, disable certificate verification
+    // Build TLS config - separate paths for insecure vs secure mode
     let config = if insecure {
-        let mut config = config;
-        config
+        rustls::ClientConfig::builder()
             .dangerous()
-            .set_certificate_verifier(Arc::new(NoVerifier));
-        config
+            .with_custom_certificate_verifier(Arc::new(NoVerifier))
+            .with_no_client_auth()
     } else {
-        config
+        let mut root_store = rustls::RootCertStore::empty();
+        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth()
     };
 
     let connector = TlsConnector::from(Arc::new(config));
