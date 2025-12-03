@@ -296,14 +296,14 @@ fn format_size(bytes: u64) -> String {
 }
 
 /// Populate cache with k3s files for a specific version
-pub async fn populate(cli: &Cli, version: &str) -> Result<()> {
+pub async fn populate(cli: &Cli, version: &str, force: bool) -> Result<()> {
     let arch = arch_string();
     let version_dir = k3s_version_cache_dir(version)?;
 
     info!("Populating cache for k3s {version} ({arch})");
     debug!("Cache directory: {}", version_dir.display());
 
-    print_populate_header(cli, version, arch, &version_dir);
+    print_populate_header(cli, version, arch, &version_dir, force);
 
     fs::create_dir_all(&version_dir).with_context(|| {
         format!(
@@ -313,19 +313,26 @@ pub async fn populate(cli: &Cli, version: &str) -> Result<()> {
     })?;
 
     let checksums = download_checksums(cli, version, arch, &version_dir).await?;
-    download_remaining_files(cli, version, arch, &version_dir, &checksums).await?;
-    verify_and_print_success(cli, &version_dir, &checksums)?;
+    download_remaining_files(cli, version, arch, &version_dir, &checksums, force).await?;
+    verify_and_print_success(cli, &version_dir, &checksums, force)?;
 
     Ok(())
 }
 
-fn print_populate_header(cli: &Cli, version: &str, arch: &str, version_dir: &Path) {
+fn print_populate_header(cli: &Cli, version: &str, arch: &str, version_dir: &Path, force: bool) {
     if !cli.quiet {
         println!("{}", "Rancher Desktop K3s Cache Setup".bold().cyan());
         println!();
         println!("Version: {}", version.yellow());
         println!("Architecture: {arch}");
         println!("Cache directory: {}", version_dir.display());
+        if force {
+            println!(
+                "{} {}",
+                "\u{26A0}".yellow(),
+                "Force mode: checksum failures will be ignored".yellow()
+            );
+        }
         println!();
     }
 }
@@ -381,6 +388,7 @@ async fn download_remaining_files(
     arch: &str,
     version_dir: &Path,
     checksums: &HashMap<String, String>,
+    force: bool,
 ) -> Result<()> {
     let files = get_download_files(arch);
     let manager = DownloadManager::new();
@@ -417,7 +425,7 @@ async fn download_remaining_files(
     let results = join_all(download_futures).await;
 
     // Process and report results
-    process_download_results(results, cli)
+    process_download_results(results, cli, force)
 }
 
 #[allow(clippy::too_many_arguments)] // All params needed for download + verification in one async task
@@ -461,8 +469,9 @@ async fn download_and_verify(
     }
 }
 
-fn process_download_results(results: Vec<DownloadResult>, cli: &Cli) -> Result<()> {
-    let mut errors = Vec::new();
+fn process_download_results(results: Vec<DownloadResult>, cli: &Cli, force: bool) -> Result<()> {
+    let mut download_errors = Vec::new();
+    let mut verification_errors = Vec::new();
 
     for download in results {
         match download.result {
@@ -488,19 +497,33 @@ fn process_download_results(results: Vec<DownloadResult>, cli: &Cli) -> Result<(
                         }
                     }
                     Some(Err(e)) => {
-                        warn!(
-                            "Checksum verification failed for {}: {}",
-                            actual_filename, e
-                        );
-                        if !cli.quiet {
-                            println!(
-                                "  {} {}",
-                                "\u{26A0}".yellow(),
-                                format!("Checksum verification failed: {e}").yellow()
+                        if force {
+                            // Force mode: warn but continue
+                            warn!(
+                                "Checksum verification failed for {}: {} (continuing due to --force)",
+                                actual_filename, e
                             );
-                        }
-                        if let Some(pb) = &download.progress_bar {
-                            DownloadManager::finish_success(pb, actual_filename.as_ref());
+                            if !cli.quiet {
+                                println!(
+                                    "  {} {}",
+                                    "\u{26A0}".yellow(),
+                                    format!("Checksum verification failed (ignored): {e}").yellow()
+                                );
+                            }
+                            if let Some(pb) = &download.progress_bar {
+                                DownloadManager::finish_success(pb, actual_filename.as_ref());
+                            }
+                        } else {
+                            // Normal mode: collect as error
+                            warn!(
+                                "Checksum verification failed for {}: {}",
+                                actual_filename, e
+                            );
+                            if let Some(pb) = &download.progress_bar {
+                                DownloadManager::finish_error(pb, actual_filename.as_ref());
+                            }
+                            verification_errors
+                                .push(format!("{actual_filename}: checksum verification failed"));
                         }
                     }
                     None => {
@@ -515,18 +538,22 @@ fn process_download_results(results: Vec<DownloadResult>, cli: &Cli) -> Result<(
                 if let Some(pb) = download.progress_bar {
                     DownloadManager::finish_error(&pb, &download.filename);
                 }
-                errors.push(format!("{}: {}", download.filename, e));
+                download_errors.push(format!("{}: {}", download.filename, e));
             }
         }
     }
 
-    if errors.is_empty() {
+    // Report all errors
+    let mut all_errors = download_errors;
+    all_errors.extend(verification_errors);
+
+    if all_errors.is_empty() {
         Ok(())
     } else {
         Err(anyhow!(
-            "Failed to download {} file(s):\n  {}",
-            errors.len(),
-            errors.join("\n  ")
+            "Failed to download/verify {} file(s):\n  {}",
+            all_errors.len(),
+            all_errors.join("\n  ")
         ))
     }
 }
@@ -535,6 +562,7 @@ fn verify_and_print_success(
     cli: &Cli,
     version_dir: &Path,
     checksums: &HashMap<String, String>,
+    force: bool,
 ) -> Result<()> {
     let binary_path = version_dir.join(k3s_binary_name());
     if binary_path.exists() {
@@ -546,7 +574,22 @@ fn verify_and_print_success(
                 }
             }
             Err(e) => {
-                return Err(anyhow!("Binary checksum verification failed: {e}"));
+                if force {
+                    warn!(
+                        "Binary checksum verification failed: {} (continuing due to --force)",
+                        e
+                    );
+                    if !cli.quiet {
+                        println!();
+                        println!(
+                            "{} {}",
+                            "\u{26A0}".yellow(),
+                            format!("Binary checksum verification failed (ignored): {e}").yellow()
+                        );
+                    }
+                } else {
+                    return Err(anyhow!("Binary checksum verification failed: {e}"));
+                }
             }
         }
     }

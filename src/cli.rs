@@ -114,6 +114,10 @@ pub enum CacheCommands {
     Populate {
         /// k3s version to download (e.g., v1.33.3+k3s1)
         version: String,
+
+        /// Continue even if checksum verification fails
+        #[arg(long, short)]
+        force: bool,
     },
 }
 
