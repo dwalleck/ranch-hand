@@ -563,6 +563,11 @@ async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<Check
 /// Timeout for network connectivity checks
 const NETWORK_CHECK_TIMEOUT_SECS: u64 = 10;
 
+/// Format error details with URL and error message
+fn format_error_details(url: &str, error: &impl std::fmt::Display) -> String {
+    format!("{url}\n{error}")
+}
+
 async fn check_https_connectivity(name: &str, url: &str, cli: &Cli) -> CheckResult {
     let client_config = HttpClientConfig::with_timeout(cli.insecure, NETWORK_CHECK_TIMEOUT_SECS);
     let client = match build_client(&client_config) {
@@ -593,10 +598,10 @@ async fn check_https_connectivity(name: &str, url: &str, cli: &Cli) -> CheckResu
                 CheckResult::fail(name, "Connection timed out").with_details(url.to_string())
             } else if e.is_connect() {
                 CheckResult::fail(name, "Connection failed")
-                    .with_details(format!("{url}\n{e}"))
+                    .with_details(format_error_details(url, &e))
             } else {
                 CheckResult::fail(name, "Request failed")
-                    .with_details(format!("{url}\n{e}"))
+                    .with_details(format_error_details(url, &e))
             }
         }
     }

@@ -95,4 +95,14 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_all_required_endpoints_use_https() {
+        for (name, url) in REQUIRED_ENDPOINTS {
+            assert!(
+                url.starts_with("https://"),
+                "Endpoint '{name}' must use HTTPS: {url}"
+            );
+        }
+    }
 }

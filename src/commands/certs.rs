@@ -11,12 +11,15 @@ use chrono::{DateTime, Utc};
 use colored::Colorize;
 use rustls::pki_types::ServerName;
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tracing::{debug, info, warn};
 use x509_parser::prelude::*;
+
+/// Ensures the crypto provider is initialized exactly once
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
 /// Connection timeout for certificate checks
 const CONNECT_TIMEOUT_SECS: u64 = 10;
@@ -158,8 +161,10 @@ async fn check_endpoint(name: &str, url: &str, insecure: bool) -> CertCheckResul
 
 /// Inner function that does the actual certificate check
 async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(CertificateInfo, bool)> {
-    // Install the ring crypto provider (ignore error if already installed)
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Install the ring crypto provider exactly once
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 
     // Build TLS config - separate paths for insecure vs secure mode
     let config = if insecure {
