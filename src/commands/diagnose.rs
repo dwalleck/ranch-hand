@@ -5,6 +5,7 @@
 use crate::cli::Cli;
 use crate::client::http::{build_client, HttpClientConfig};
 use crate::config::{ConfigError, RdEngineConfig};
+use crate::constants::REQUIRED_ENDPOINTS;
 use crate::paths::{arch_string, k3s_cache_dir};
 use anyhow::Result;
 use colored::Colorize;
@@ -527,28 +528,6 @@ fn check_cache_status(show_progress: bool) -> Vec<CheckResult> {
 
     results
 }
-
-/// URL endpoints required by Rancher Desktop
-/// See: https://docs.rancherdesktop.io/getting-started/installation#proxy-environments-important-url-patterns
-const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
-    (
-        "K3s Releases API",
-        "https://api.github.com/repos/k3s-io/k3s/releases",
-    ),
-    (
-        "K3s Downloads",
-        "https://github.com/k3s-io/k3s/releases/download",
-    ),
-    (
-        "kubectl Releases",
-        "https://storage.googleapis.com/kubernetes-release/release",
-    ),
-    (
-        "Version Check",
-        "https://desktop.version.rancher.io/v1/checkupgrade",
-    ),
-    ("Documentation", "https://docs.rancherdesktop.io"),
-];
 
 /// Check network connectivity to required domains
 async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<CheckResult> {

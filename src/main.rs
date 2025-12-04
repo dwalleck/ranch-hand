@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod commands;
 mod config;
+pub mod constants;
 mod paths;
 mod utils;
 

@@ -5,6 +5,7 @@
 
 use crate::cli::Cli;
 use crate::client::http::is_proxy_issuer;
+use crate::constants::{extract_domain, REQUIRED_ENDPOINTS};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use colored::Colorize;
@@ -16,28 +17,6 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tracing::{debug, info, warn};
 use x509_parser::prelude::*;
-
-/// URL endpoints required by Rancher Desktop
-/// See: https://docs.rancherdesktop.io/getting-started/installation#proxy-environments-important-url-patterns
-const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
-    (
-        "K3s Releases API",
-        "https://api.github.com/repos/k3s-io/k3s/releases",
-    ),
-    (
-        "K3s Downloads",
-        "https://github.com/k3s-io/k3s/releases/download",
-    ),
-    (
-        "kubectl Releases",
-        "https://storage.googleapis.com/kubernetes-release/release",
-    ),
-    (
-        "Version Check",
-        "https://desktop.version.rancher.io/v1/checkupgrade",
-    ),
-    ("Documentation", "https://docs.rancherdesktop.io"),
-];
 
 /// Connection timeout for certificate checks
 const CONNECT_TIMEOUT_SECS: u64 = 10;
@@ -139,13 +118,6 @@ pub async fn check(cli: &Cli) -> Result<()> {
     }
 
     Ok(())
-}
-
-/// Extract domain from URL
-fn extract_domain(url: &str) -> Option<String> {
-    url::Url::parse(url)
-        .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
 }
 
 /// Check a single endpoint's certificate
