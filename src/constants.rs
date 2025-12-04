@@ -4,18 +4,14 @@
 ///
 /// These endpoints are used for network connectivity checks and certificate validation.
 /// See: <https://docs.rancherdesktop.io/getting-started/installation#proxy-environments-important-url-patterns>
-///
-/// Note: Some URLs are path prefixes (e.g., K3s Downloads) rather than complete
-/// resource URLs. This is intentional as we only need the domain for connectivity
-/// checks, and these prefixes represent the base paths for downloads.
 pub const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
     (
         "K3s Releases API",
         "https://api.github.com/repos/k3s-io/k3s/releases",
     ),
     (
-        "K3s Downloads",
-        "https://github.com/k3s-io/k3s/releases/download",
+        "K3s Releases",
+        "https://github.com/k3s-io/k3s/releases",
     ),
     (
         "kubectl Releases",
@@ -57,7 +53,7 @@ mod tests {
             Some("api.github.com".to_string())
         );
         assert_eq!(
-            extract_domain("https://github.com/k3s-io/k3s/releases/download"),
+            extract_domain("https://github.com/k3s-io/k3s/releases"),
             Some("github.com".to_string())
         );
         assert_eq!(

@@ -575,7 +575,7 @@ async fn check_https_connectivity(name: &str, url: &str, cli: &Cli) -> CheckResu
         Ok(response) => {
             let status = response.status();
             if status.is_success() || status.is_redirection() {
-                CheckResult::ok(name, format!("OK (HTTP {status})"))
+                CheckResult::ok(name, format!("OK (HTTP {status})")).with_details(url.to_string())
             } else {
                 CheckResult::warn(name, format!("HTTP {status}")).with_details(url.to_string())
             }
