@@ -33,10 +33,11 @@ pub const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
 /// assert_eq!(extract_domain("https://api.github.com/repos"), Some("api.github.com".to_string()));
 /// assert_eq!(extract_domain("invalid-url"), None);
 /// ```
+#[must_use]
 pub fn extract_domain(url: &str) -> Option<String> {
     url::Url::parse(url)
         .ok()
-        .and_then(|u| u.host_str().map(|s| s.to_string()))
+        .and_then(|u| u.host_str().map(ToString::to_string))
 }
 
 #[cfg(test)]

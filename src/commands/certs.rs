@@ -125,17 +125,14 @@ pub async fn check(cli: &Cli) -> Result<()> {
 
 /// Check a single endpoint's certificate
 async fn check_endpoint(name: &str, url: &str, insecure: bool) -> CertCheckResult {
-    let domain = match extract_domain(url) {
-        Some(d) => d,
-        None => {
-            return CertCheckResult {
-                domain: name.to_string(),
-                success: false,
-                error: Some(format!("Invalid URL: {url}")),
-                certificate: None,
-                proxy_detected: false,
-            }
-        }
+    let Some(domain) = extract_domain(url) else {
+        return CertCheckResult {
+            domain: name.to_string(),
+            success: false,
+            error: Some(format!("Invalid URL: {url}")),
+            certificate: None,
+            proxy_detected: false,
+        };
     };
 
     match check_domain_inner(&domain, insecure).await {
