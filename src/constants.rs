@@ -9,10 +9,7 @@ pub const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
         "K3s Releases API",
         "https://api.github.com/repos/k3s-io/k3s/releases",
     ),
-    (
-        "K3s Releases",
-        "https://github.com/k3s-io/k3s/releases",
-    ),
+    ("K3s Releases", "https://github.com/k3s-io/k3s/releases"),
     (
         "kubectl Releases",
         "https://storage.googleapis.com/kubernetes-release/release",
@@ -89,10 +86,7 @@ mod tests {
     fn test_all_required_endpoints_have_valid_domains() {
         for (name, url) in REQUIRED_ENDPOINTS {
             let domain = extract_domain(url);
-            assert!(
-                domain.is_some(),
-                "Endpoint '{name}' has invalid URL: {url}"
-            );
+            assert!(domain.is_some(), "Endpoint '{name}' has invalid URL: {url}");
         }
     }
 

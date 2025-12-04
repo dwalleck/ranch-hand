@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
         Commands::Cache { command } => match command {
             CacheCommands::List => commands::cache::list(&cli).await,
             CacheCommands::Populate { version, force } => {
-                commands::cache::populate(&cli, version, *force).await
+                commands::cache::populate(&cli, version.as_deref(), *force).await
             }
         },
         Commands::Diagnose => commands::diagnose::run(&cli).await,
