@@ -404,32 +404,31 @@ fn select_version_interactive(versions: &[String]) -> Result<String> {
 /// Populate cache with k3s files for a specific version
 pub async fn populate(cli: &Cli, version: Option<&str>, force: bool) -> Result<()> {
     // If no version provided, fetch available versions and let user select
-    let version = match version {
-        Some(v) => v.to_string(),
-        None => {
-            let spinner = if !cli.quiet {
-                let sp = ProgressBar::new_spinner();
-                sp.set_style(
-                    ProgressStyle::default_spinner()
-                        .template("{spinner:.cyan} {msg}")
-                        .expect("valid spinner template"),
-                );
-                sp.set_message("Fetching available k3s versions...");
-                sp.enable_steady_tick(std::time::Duration::from_millis(100));
-                Some(sp)
-            } else {
-                None
-            };
+    let version = if let Some(v) = version {
+        v.to_string()
+    } else {
+        let spinner = if cli.quiet {
+            None
+        } else {
+            let sp = ProgressBar::new_spinner();
+            sp.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.cyan} {msg}")
+                    .expect("valid spinner template"),
+            );
+            sp.set_message("Fetching available k3s versions...");
+            sp.enable_steady_tick(std::time::Duration::from_millis(100));
+            Some(sp)
+        };
 
-            let versions = fetch_available_versions(cli).await;
+        let versions = fetch_available_versions(cli).await;
 
-            if let Some(sp) = spinner {
-                sp.finish_and_clear();
-            }
-
-            let versions = versions?;
-            select_version_interactive(&versions)?
+        if let Some(sp) = spinner {
+            sp.finish_and_clear();
         }
+
+        let versions = versions?;
+        select_version_interactive(&versions)?
     };
 
     validate_version(&version)?;
