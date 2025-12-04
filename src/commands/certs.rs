@@ -17,13 +17,26 @@ use tokio_rustls::TlsConnector;
 use tracing::{debug, info, warn};
 use x509_parser::prelude::*;
 
-/// Domains required by Rancher Desktop
-const REQUIRED_DOMAINS: &[&str] = &[
-    "github.com",
-    "api.github.com",
-    "storage.googleapis.com",
-    "desktop.version.rancher.io",
-    "docs.rancherdesktop.io",
+/// URL endpoints required by Rancher Desktop
+/// See: https://docs.rancherdesktop.io/getting-started/installation#proxy-environments-important-url-patterns
+const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
+    (
+        "K3s Releases API",
+        "https://api.github.com/repos/k3s-io/k3s/releases",
+    ),
+    (
+        "K3s Downloads",
+        "https://github.com/k3s-io/k3s/releases/download",
+    ),
+    (
+        "kubectl Releases",
+        "https://storage.googleapis.com/kubernetes-release/release",
+    ),
+    (
+        "Version Check",
+        "https://desktop.version.rancher.io/v1/checkupgrade",
+    ),
+    ("Documentation", "https://docs.rancherdesktop.io"),
 ];
 
 /// Connection timeout for certificate checks
@@ -91,11 +104,11 @@ pub async fn check(cli: &Cli) -> Result<()> {
     }
 
     // Check all domains concurrently for better performance
-    let futures: Vec<_> = REQUIRED_DOMAINS
+    let futures: Vec<_> = REQUIRED_ENDPOINTS
         .iter()
-        .map(|domain| {
-            debug!("Checking domain: {}", domain);
-            check_domain(domain, cli.insecure)
+        .map(|(name, url)| {
+            debug!("Checking endpoint: {} ({})", name, url);
+            check_endpoint(name, url, cli.insecure)
         })
         .collect();
 
@@ -128,20 +141,40 @@ pub async fn check(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Check a single domain's certificate
-async fn check_domain(domain: &str, insecure: bool) -> CertCheckResult {
-    match check_domain_inner(domain, insecure).await {
+/// Extract domain from URL
+fn extract_domain(url: &str) -> Option<String> {
+    url::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(|s| s.to_string()))
+}
+
+/// Check a single endpoint's certificate
+async fn check_endpoint(name: &str, url: &str, insecure: bool) -> CertCheckResult {
+    let domain = match extract_domain(url) {
+        Some(d) => d,
+        None => {
+            return CertCheckResult {
+                domain: name.to_string(),
+                success: false,
+                error: Some(format!("Invalid URL: {url}")),
+                certificate: None,
+                proxy_detected: false,
+            }
+        }
+    };
+
+    match check_domain_inner(&domain, insecure).await {
         Ok((cert_info, proxy_detected)) => CertCheckResult {
-            domain: domain.to_string(),
+            domain: format!("{name} ({domain})"),
             success: true,
             error: None,
             certificate: Some(cert_info),
             proxy_detected,
         },
         Err(e) => {
-            warn!("Certificate check failed for {}: {}", domain, e);
+            warn!("Certificate check failed for {} ({}): {}", name, domain, e);
             CertCheckResult {
-                domain: domain.to_string(),
+                domain: format!("{name} ({domain})"),
                 success: false,
                 error: Some(e.to_string()),
                 certificate: None,
@@ -365,9 +398,9 @@ fn generate_recommendations(results: &[CertCheckResult], proxy_detected: bool) -
 
     if proxy_detected {
         recommendations
-            .push("Contact your IT department to whitelist the following domains:".to_string());
-        for domain in REQUIRED_DOMAINS {
-            recommendations.push(format!("    - {domain}"));
+            .push("Contact your IT department to whitelist the following URLs:".to_string());
+        for (name, url) in REQUIRED_ENDPOINTS {
+            recommendations.push(format!("    - {name}: {url}"));
         }
         recommendations.push(
             "Alternatively, use --insecure flag (not recommended for production)".to_string(),

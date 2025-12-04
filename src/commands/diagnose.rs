@@ -528,21 +528,41 @@ fn check_cache_status(show_progress: bool) -> Vec<CheckResult> {
     results
 }
 
+/// URL endpoints required by Rancher Desktop
+/// See: https://docs.rancherdesktop.io/getting-started/installation#proxy-environments-important-url-patterns
+const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
+    (
+        "K3s Releases API",
+        "https://api.github.com/repos/k3s-io/k3s/releases",
+    ),
+    (
+        "K3s Downloads",
+        "https://github.com/k3s-io/k3s/releases/download",
+    ),
+    (
+        "kubectl Releases",
+        "https://storage.googleapis.com/kubernetes-release/release",
+    ),
+    (
+        "Version Check",
+        "https://desktop.version.rancher.io/v1/checkupgrade",
+    ),
+    ("Documentation", "https://docs.rancherdesktop.io"),
+];
+
 /// Check network connectivity to required domains
 async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<CheckResult> {
     if show_progress {
         print_category_header("Network Connectivity");
     }
 
-    let domains = ["github.com", "storage.googleapis.com"];
-
     // Run HTTPS checks and DNS check concurrently for better performance
-    let https_futures: Vec<_> = domains
+    let https_futures: Vec<_> = REQUIRED_ENDPOINTS
         .iter()
-        .map(|domain| check_https_connectivity(domain, cli))
+        .map(|(name, url)| check_https_connectivity(name, url, cli))
         .collect();
 
-    let dns_future = check_dns_resolution("github.com");
+    let dns_future = check_dns_resolution("api.github.com");
 
     let (https_results, dns_check) =
         tokio::join!(futures_util::future::join_all(https_futures), dns_future);
@@ -564,22 +584,21 @@ async fn check_network_connectivity(cli: &Cli, show_progress: bool) -> Vec<Check
 /// Timeout for network connectivity checks
 const NETWORK_CHECK_TIMEOUT_SECS: u64 = 10;
 
-async fn check_https_connectivity(domain: &str, cli: &Cli) -> CheckResult {
+async fn check_https_connectivity(name: &str, url: &str, cli: &Cli) -> CheckResult {
     let client_config = HttpClientConfig::with_timeout(cli.insecure, NETWORK_CHECK_TIMEOUT_SECS);
     let client = match build_client(&client_config) {
         Ok(c) => c,
-        Err(e) => return CheckResult::fail(domain, format!("Client error: {e}")),
+        Err(e) => return CheckResult::fail(name, format!("Client error: {e}")),
     };
 
-    let url = format!("https://{domain}");
     // Note: timeout is already configured on the client via HttpClientConfig
-    match client.head(&url).send().await {
+    match client.head(url).send().await {
         Ok(response) => {
             let status = response.status();
             if status.is_success() || status.is_redirection() {
-                CheckResult::ok(domain, format!("HTTPS OK (HTTP {status})"))
+                CheckResult::ok(name, format!("OK (HTTP {status})"))
             } else {
-                CheckResult::warn(domain, format!("HTTP {status}"))
+                CheckResult::warn(name, format!("HTTP {status}")).with_details(url.to_string())
             }
         }
         Err(e) => {
@@ -588,15 +607,17 @@ async fn check_https_connectivity(domain: &str, cli: &Cli) -> CheckResult {
                 || error_str.contains("ssl")
                 || error_str.contains("tls")
             {
-                CheckResult::fail(domain, "SSL/TLS error (possible proxy)").with_details(format!(
-                    "{e}\n\nRun 'rh certs check' for detailed certificate analysis"
+                CheckResult::fail(name, "SSL/TLS error (possible proxy)").with_details(format!(
+                    "{url}\n{e}\n\nRun 'rh certs check' for detailed certificate analysis"
                 ))
             } else if e.is_timeout() {
-                CheckResult::fail(domain, "Connection timed out")
+                CheckResult::fail(name, "Connection timed out").with_details(url.to_string())
             } else if e.is_connect() {
-                CheckResult::fail(domain, "Connection failed").with_details(e.to_string())
+                CheckResult::fail(name, "Connection failed")
+                    .with_details(format!("{url}\n{e}"))
             } else {
-                CheckResult::fail(domain, "Request failed").with_details(e.to_string())
+                CheckResult::fail(name, "Request failed")
+                    .with_details(format!("{url}\n{e}"))
             }
         }
     }
