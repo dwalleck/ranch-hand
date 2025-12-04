@@ -576,10 +576,17 @@ async fn check_https_connectivity(name: &str, url: &str, cli: &Cli) -> CheckResu
     };
 
     // Note: timeout is already configured on the client via HttpClientConfig
+    // We use HEAD for efficiency, but any HTTP response proves connectivity
     match client.head(url).send().await {
         Ok(response) => {
             let status = response.status();
+            // Any HTTP response proves connectivity (DNS, TCP, TLS all worked)
+            // 405 = HEAD not allowed, 403 = auth required, 404 = path not found
+            // These are all fine for connectivity checking purposes
             if status.is_success() || status.is_redirection() {
+                CheckResult::ok(name, format!("OK (HTTP {status})")).with_details(url.to_string())
+            } else if status.as_u16() == 405 || status.as_u16() == 403 || status.as_u16() == 404 {
+                // These status codes still prove connectivity works
                 CheckResult::ok(name, format!("OK (HTTP {status})")).with_details(url.to_string())
             } else {
                 CheckResult::warn(name, format!("HTTP {status}")).with_details(url.to_string())
