@@ -164,17 +164,24 @@ async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(Certificate
     });
 
     // Build TLS config - separate paths for insecure vs secure mode
+    // In secure mode, use platform verifier to match what the OS/browser would see
     let config = if insecure {
         rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoVerifier))
             .with_no_client_auth()
     } else {
-        let mut root_store = rustls::RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
-            .with_no_client_auth()
+        // Use platform certificate verifier (Windows CryptoAPI, macOS Security.framework, etc.)
+        // This matches what Electron/Chromium would see, unlike reqwest's default which uses
+        // Mozilla's bundled CA certificates via webpki-roots.
+        //
+        // Note: Only this diagnostic tool uses platform verification. The HTTP client
+        // (client/http.rs) uses reqwest's default verification, which is intentional -
+        // we want the diagnostic to show what the OS sees, while the HTTP client behavior
+        // matches what most Rust HTTP clients would experience.
+        use rustls_platform_verifier::ConfigVerifierExt;
+        rustls::ClientConfig::with_platform_verifier()
+            .context("Failed to initialize platform certificate verifier")?
     };
 
     let connector = TlsConnector::from(Arc::new(config));
