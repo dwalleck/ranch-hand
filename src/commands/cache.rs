@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
 use dialoguer::FuzzySelect;
 use futures_util::future::join_all;
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -349,11 +349,14 @@ async fn fetch_available_versions(cli: &Cli) -> Result<Vec<String>> {
         .context("Failed to fetch k3s releases from GitHub")?;
 
     if !response.status().is_success() {
-        return Err(anyhow!(
-            "GitHub API returned status {}: {}",
-            response.status(),
-            response.text().await.unwrap_or_default()
-        ));
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let details = if body.is_empty() {
+            "(no response body)".to_string()
+        } else {
+            body
+        };
+        return Err(anyhow!("GitHub API returned status {status}: {details}"));
     }
 
     let releases: Vec<GitHubRelease> = response
@@ -404,10 +407,27 @@ pub async fn populate(cli: &Cli, version: Option<&str>, force: bool) -> Result<(
     let version = match version {
         Some(v) => v.to_string(),
         None => {
-            if !cli.quiet {
-                println!("{}", "Fetching available k3s versions...".dimmed());
+            let spinner = if !cli.quiet {
+                let sp = ProgressBar::new_spinner();
+                sp.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.cyan} {msg}")
+                        .expect("valid spinner template"),
+                );
+                sp.set_message("Fetching available k3s versions...");
+                sp.enable_steady_tick(std::time::Duration::from_millis(100));
+                Some(sp)
+            } else {
+                None
+            };
+
+            let versions = fetch_available_versions(cli).await;
+
+            if let Some(sp) = spinner {
+                sp.finish_and_clear();
             }
-            let versions = fetch_available_versions(cli).await?;
+
+            let versions = versions?;
             select_version_interactive(&versions)?
         }
     };
