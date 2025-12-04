@@ -22,7 +22,7 @@ hex = "0.4"
 dirs = "5"
 indicatif = "0.17"
 colored = "2"
-dialoguer = "0.11"
+dialoguer = { version = "0.11", features = ["fuzzy-select"] }
 thiserror = "2"
 anyhow = "1"
 futures-util = "0.3"
@@ -59,3 +59,8 @@ module_name_repetitions = "allow"
 strip = true
 lto = true
 codegen-units = 1
+
+# Temporary patch for cmake to support VS 18 on Windows ARM64
+# See: https://github.com/reflectronic/cmake-rs/tree/vs-18
+[patch.crates-io]
+cmake = { git = "https://github.com/reflectronic/cmake-rs", branch = "vs-18" }

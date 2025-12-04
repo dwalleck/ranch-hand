@@ -5,26 +5,21 @@
 
 use crate::cli::Cli;
 use crate::client::http::is_proxy_issuer;
+use crate::constants::{extract_domain, REQUIRED_ENDPOINTS};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use colored::Colorize;
 use rustls::pki_types::ServerName;
 use serde::Serialize;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tracing::{debug, info, warn};
 use x509_parser::prelude::*;
 
-/// Domains required by Rancher Desktop
-const REQUIRED_DOMAINS: &[&str] = &[
-    "github.com",
-    "api.github.com",
-    "storage.googleapis.com",
-    "desktop.version.rancher.io",
-    "docs.rancherdesktop.io",
-];
+/// Ensures the crypto provider is initialized exactly once
+static CRYPTO_PROVIDER_INIT: Once = Once::new();
 
 /// Connection timeout for certificate checks
 const CONNECT_TIMEOUT_SECS: u64 = 10;
@@ -91,11 +86,11 @@ pub async fn check(cli: &Cli) -> Result<()> {
     }
 
     // Check all domains concurrently for better performance
-    let futures: Vec<_> = REQUIRED_DOMAINS
+    let futures: Vec<_> = REQUIRED_ENDPOINTS
         .iter()
-        .map(|domain| {
-            debug!("Checking domain: {}", domain);
-            check_domain(domain, cli.insecure)
+        .map(|(name, url)| {
+            debug!("Checking endpoint: {} ({})", name, url);
+            check_endpoint(name, url, cli.insecure)
         })
         .collect();
 
@@ -128,20 +123,30 @@ pub async fn check(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Check a single domain's certificate
-async fn check_domain(domain: &str, insecure: bool) -> CertCheckResult {
-    match check_domain_inner(domain, insecure).await {
+/// Check a single endpoint's certificate
+async fn check_endpoint(name: &str, url: &str, insecure: bool) -> CertCheckResult {
+    let Some(domain) = extract_domain(url) else {
+        return CertCheckResult {
+            domain: name.to_string(),
+            success: false,
+            error: Some(format!("Invalid URL: {url}")),
+            certificate: None,
+            proxy_detected: false,
+        };
+    };
+
+    match check_domain_inner(&domain, insecure).await {
         Ok((cert_info, proxy_detected)) => CertCheckResult {
-            domain: domain.to_string(),
+            domain: format!("{name} ({domain})"),
             success: true,
             error: None,
             certificate: Some(cert_info),
             proxy_detected,
         },
         Err(e) => {
-            warn!("Certificate check failed for {}: {}", domain, e);
+            warn!("Certificate check failed for {} ({}): {}", name, domain, e);
             CertCheckResult {
-                domain: domain.to_string(),
+                domain: format!("{name} ({domain})"),
                 success: false,
                 error: Some(e.to_string()),
                 certificate: None,
@@ -153,8 +158,10 @@ async fn check_domain(domain: &str, insecure: bool) -> CertCheckResult {
 
 /// Inner function that does the actual certificate check
 async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(CertificateInfo, bool)> {
-    // Install the ring crypto provider (ignore error if already installed)
-    let _ = rustls::crypto::ring::default_provider().install_default();
+    // Install the ring crypto provider exactly once
+    CRYPTO_PROVIDER_INIT.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
 
     // Build TLS config - separate paths for insecure vs secure mode
     let config = if insecure {
@@ -365,9 +372,9 @@ fn generate_recommendations(results: &[CertCheckResult], proxy_detected: bool) -
 
     if proxy_detected {
         recommendations
-            .push("Contact your IT department to whitelist the following domains:".to_string());
-        for domain in REQUIRED_DOMAINS {
-            recommendations.push(format!("    - {domain}"));
+            .push("Contact your IT department to whitelist the following URLs:".to_string());
+        for (name, url) in REQUIRED_ENDPOINTS {
+            recommendations.push(format!("    - {name}: {url}"));
         }
         recommendations.push(
             "Alternatively, use --insecure flag (not recommended for production)".to_string(),

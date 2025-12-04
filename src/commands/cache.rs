@@ -1,7 +1,7 @@
 //! Cache management commands for k3s files.
 
 use crate::cli::Cli;
-use crate::client::http::HttpClientConfig;
+use crate::client::http::{build_client, HttpClientConfig};
 use crate::paths::{arch_string, k3s_binary_name, k3s_cache_dir, k3s_version_cache_dir};
 use crate::utils::checksum::{parse_checksum_file, verify_file_from_checksums, ChecksumError};
 use crate::utils::download::{
@@ -9,16 +9,32 @@ use crate::utils::download::{
 };
 use anyhow::{anyhow, Context, Result};
 use colored::Colorize;
+use dialoguer::FuzzySelect;
 use futures_util::future::join_all;
-use indicatif::ProgressBar;
-use serde::Serialize;
+use indicatif::{ProgressBar, ProgressStyle};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 /// k3s release base URL
 const K3S_RELEASES_URL: &str = "https://github.com/k3s-io/k3s/releases/download";
+
+/// k3s releases API URL
+const K3S_RELEASES_API_URL: &str = "https://api.github.com/repos/k3s-io/k3s/releases";
+
+/// Maximum number of versions to fetch from GitHub API
+const MAX_VERSIONS_TO_FETCH: usize = 50;
+
+/// GitHub release response structure
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    prerelease: bool,
+    draft: bool,
+}
 
 /// Files to download for cache populate
 fn get_download_files(arch: &str) -> Vec<(&'static str, String)> {
@@ -318,17 +334,112 @@ fn validate_version(version: &str) -> Result<()> {
     Ok(())
 }
 
+/// Fetch available k3s versions from GitHub API
+async fn fetch_available_versions(cli: &Cli) -> Result<Vec<String>> {
+    let url = format!("{K3S_RELEASES_API_URL}?per_page={MAX_VERSIONS_TO_FETCH}");
+    debug!("Fetching k3s releases from: {}", url);
+
+    let client = build_client(&HttpClientConfig::new(cli.insecure))?;
+    let response = client
+        .get(&url)
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "ranch-hand")
+        .send()
+        .await
+        .context("Failed to fetch k3s releases from GitHub")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        let details = if body.is_empty() {
+            "(no response body)".to_string()
+        } else {
+            body
+        };
+        return Err(anyhow!("GitHub API returned status {status}: {details}"));
+    }
+
+    let releases: Vec<GitHubRelease> = response
+        .json()
+        .await
+        .context("Failed to parse GitHub releases response")?;
+
+    let versions: Vec<String> = releases
+        .into_iter()
+        .filter(|r| !r.prerelease && !r.draft)
+        .map(|r| r.tag_name)
+        .collect();
+
+    if versions.is_empty() {
+        return Err(anyhow!("No stable k3s releases found"));
+    }
+
+    debug!("Found {} stable k3s versions", versions.len());
+    Ok(versions)
+}
+
+/// Prompt user to select a k3s version interactively
+fn select_version_interactive(versions: &[String]) -> Result<String> {
+    if !std::io::stdin().is_terminal() {
+        return Err(anyhow!(
+            "No version specified and not running in interactive mode.\n\
+             Please specify a version: rh cache populate <version>\n\
+             Or run interactively to select from available versions."
+        ));
+    }
+
+    println!("{}", "Select a k3s version to download:".cyan());
+    println!();
+
+    let selection = FuzzySelect::new()
+        .with_prompt("Version (type to filter)")
+        .items(versions)
+        .default(0)
+        .interact()
+        .context("Failed to get version selection")?;
+
+    Ok(versions[selection].clone())
+}
+
 /// Populate cache with k3s files for a specific version
-pub async fn populate(cli: &Cli, version: &str, force: bool) -> Result<()> {
-    validate_version(version)?;
+pub async fn populate(cli: &Cli, version: Option<&str>, force: bool) -> Result<()> {
+    // If no version provided, fetch available versions and let user select
+    let version = if let Some(v) = version {
+        v.to_string()
+    } else {
+        let spinner = if cli.quiet {
+            None
+        } else {
+            let sp = ProgressBar::new_spinner();
+            sp.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.cyan} {msg}")
+                    .expect("valid spinner template"),
+            );
+            sp.set_message("Fetching available k3s versions...");
+            sp.enable_steady_tick(std::time::Duration::from_millis(100));
+            Some(sp)
+        };
+
+        let versions = fetch_available_versions(cli).await;
+
+        if let Some(sp) = spinner {
+            sp.finish_and_clear();
+        }
+
+        let versions = versions?;
+        select_version_interactive(&versions)?
+    };
+
+    validate_version(&version)?;
 
     let arch = arch_string();
-    let version_dir = k3s_version_cache_dir(version)?;
+    let version_dir = k3s_version_cache_dir(&version)?;
 
     info!("Populating cache for k3s {version} ({arch})");
     debug!("Cache directory: {}", version_dir.display());
 
-    print_populate_header(cli, version, arch, &version_dir, force);
+    print_populate_header(cli, &version, arch, &version_dir, force);
 
     fs::create_dir_all(&version_dir).with_context(|| {
         format!(
@@ -337,8 +448,8 @@ pub async fn populate(cli: &Cli, version: &str, force: bool) -> Result<()> {
         )
     })?;
 
-    let checksums = download_checksums(cli, version, arch, &version_dir).await?;
-    download_remaining_files(cli, version, arch, &version_dir, &checksums, force).await?;
+    let checksums = download_checksums(cli, &version, arch, &version_dir).await?;
+    download_remaining_files(cli, &version, arch, &version_dir, &checksums, force).await?;
     verify_and_print_success(cli, &version_dir, &checksums, force)?;
 
     Ok(())

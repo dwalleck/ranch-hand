@@ -21,6 +21,7 @@
 //! The tool provides interactive prompts to ensure users understand the security
 //! implications before proceeding with certificate bypass.
 
+use crate::constants::extract_domain;
 use anyhow::{Context, Result};
 use dialoguer::Confirm;
 use reqwest::Client;
@@ -173,7 +174,7 @@ async fn handle_certificate_error(
     error: &reqwest::Error,
     config: &HttpClientConfig,
 ) -> Result<reqwest::Response> {
-    let domain = extract_domain(url);
+    let domain = extract_domain_or_unknown(url);
     let error_reason = extract_cert_error_reason(error);
 
     // If already in insecure mode, this shouldn't happen, but propagate the error
@@ -227,15 +228,12 @@ async fn handle_certificate_error(
     .into())
 }
 
-/// Extract domain from URL
-fn extract_domain(url: &str) -> String {
-    match url::Url::parse(url) {
-        Ok(u) => u.host_str().unwrap_or("unknown").to_string(),
-        Err(e) => {
-            warn!("Failed to parse URL '{url}': {e}");
-            "unknown".to_string()
-        }
-    }
+/// Extract domain from URL, returning "unknown" if parsing fails
+fn extract_domain_or_unknown(url: &str) -> String {
+    extract_domain(url).unwrap_or_else(|| {
+        warn!("Failed to parse URL '{url}'");
+        "unknown".to_string()
+    })
 }
 
 /// Extract a human-readable reason from certificate errors
@@ -295,13 +293,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_extract_domain() {
-        assert_eq!(extract_domain("https://github.com/foo"), "github.com");
+    fn test_extract_domain_or_unknown() {
         assert_eq!(
-            extract_domain("https://api.github.com/repos"),
+            extract_domain_or_unknown("https://github.com/foo"),
+            "github.com"
+        );
+        assert_eq!(
+            extract_domain_or_unknown("https://api.github.com/repos"),
             "api.github.com"
         );
-        assert_eq!(extract_domain("invalid"), "unknown");
+        assert_eq!(extract_domain_or_unknown("invalid"), "unknown");
     }
 
     #[test]
