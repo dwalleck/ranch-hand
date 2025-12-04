@@ -172,16 +172,16 @@ async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(Certificate
             .with_no_client_auth()
     } else {
         // Use platform certificate verifier (Windows CryptoAPI, macOS Security.framework, etc.)
-        // This matches what Electron/Chromium would see, unlike webpki_roots which uses
-        // Mozilla's bundled CA certificates
-        use rustls_platform_verifier::BuilderVerifierExt;
-        let crypto_provider = Arc::new(rustls::crypto::ring::default_provider());
-        rustls::ClientConfig::builder_with_provider(crypto_provider)
-            .with_safe_default_protocol_versions()
-            .context("Failed to set TLS protocol versions")?
-            .with_platform_verifier()
+        // This matches what Electron/Chromium would see, unlike reqwest's default which uses
+        // Mozilla's bundled CA certificates via webpki-roots.
+        //
+        // Note: Only this diagnostic tool uses platform verification. The HTTP client
+        // (client/http.rs) uses reqwest's default verification, which is intentional -
+        // we want the diagnostic to show what the OS sees, while the HTTP client behavior
+        // matches what most Rust HTTP clients would experience.
+        use rustls_platform_verifier::ConfigVerifierExt;
+        rustls::ClientConfig::with_platform_verifier()
             .context("Failed to initialize platform certificate verifier")?
-            .with_no_client_auth()
     };
 
     let connector = TlsConnector::from(Arc::new(config));
