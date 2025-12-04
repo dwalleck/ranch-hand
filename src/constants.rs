@@ -5,31 +5,33 @@
 /// These endpoints are used for network connectivity checks and certificate validation.
 /// See: <https://docs.rancherdesktop.io/getting-started/installation#proxy-environments-important-url-patterns>
 pub const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
-    (
-        "K3s Releases API",
-        "https://api.github.com/repos/k3s-io/k3s/releases",
-    ),
+    // GitHub API - used to query available k3s releases
+    // Uses root endpoint which returns rate limit info without auth
+    ("GitHub API", "https://api.github.com"),
+    // GitHub - k3s release page
     ("K3s Releases", "https://github.com/k3s-io/k3s/releases"),
+    // GitHub CDN - where release assets (binaries, images) are served from
+    // Base URL returns 404 but proves connectivity to the CDN
     (
-        // GitHub serves release asset downloads from this CDN domain
-        // k3s binaries and airgap images are downloaded from here
         "GitHub Release Assets",
         "https://objects.githubusercontent.com",
     ),
+    // GitHub raw content - checksums and other raw files
+    ("GitHub Raw Content", "https://raw.githubusercontent.com"),
+    // k3s update channel - used to check for k3s versions
+    ("K3s Update Channel", "https://update.k3s.io"),
+    // kubectl releases - stable.txt returns latest version
     (
-        // Raw file content from GitHub (checksums, etc.)
-        "GitHub Raw Content",
-        "https://raw.githubusercontent.com",
-    ),
-    (
-        // Uses stable.txt which returns the latest stable kubectl version
         "kubectl Releases",
         "https://storage.googleapis.com/kubernetes-release/release/stable.txt",
     ),
+    // Rancher Desktop version check API
+    // Returns 405 for HEAD but proves connectivity
     (
         "Version Check",
         "https://desktop.version.rancher.io/v1/checkupgrade",
     ),
+    // Rancher Desktop documentation
     ("Documentation", "https://docs.rancherdesktop.io"),
 ];
 
@@ -59,7 +61,7 @@ mod tests {
     #[test]
     fn test_extract_domain_valid_urls() {
         assert_eq!(
-            extract_domain("https://api.github.com/repos/k3s-io/k3s/releases"),
+            extract_domain("https://api.github.com"),
             Some("api.github.com".to_string())
         );
         assert_eq!(
@@ -73,6 +75,10 @@ mod tests {
         assert_eq!(
             extract_domain("https://raw.githubusercontent.com"),
             Some("raw.githubusercontent.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://update.k3s.io"),
+            Some("update.k3s.io".to_string())
         );
         assert_eq!(
             extract_domain("https://storage.googleapis.com/kubernetes-release/release/stable.txt"),

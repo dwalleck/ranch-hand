@@ -215,12 +215,22 @@ async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(Certificate
         return Err(anyhow::anyhow!("Empty certificate chain from {domain}"));
     }
 
-    // Parse the leaf certificate
+    // Parse the leaf certificate for display
     let leaf_cert = &peer_certs[0];
     let cert_info = parse_certificate(leaf_cert, peer_certs.len());
 
-    // Check if this looks like a corporate proxy
-    let proxy_detected = is_proxy_issuer(&cert_info.issuer);
+    // Check ALL certificates in the chain for corporate proxy issuers
+    // This catches cases where iboss/zscaler is an intermediate or root CA,
+    // not just the direct issuer of the leaf certificate
+    let proxy_detected = peer_certs.iter().any(|cert| {
+        if let Ok((_, parsed)) = X509Certificate::from_der(cert.as_ref()) {
+            let subject = extract_cn_or_subject(&parsed.subject);
+            let issuer = extract_cn_or_subject(&parsed.issuer);
+            is_proxy_issuer(&subject) || is_proxy_issuer(&issuer)
+        } else {
+            false
+        }
+    });
 
     Ok((cert_info, proxy_detected))
 }
