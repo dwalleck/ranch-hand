@@ -22,8 +22,9 @@ pub const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
         "https://raw.githubusercontent.com",
     ),
     (
+        // Uses stable.txt which returns the latest stable kubectl version
         "kubectl Releases",
-        "https://storage.googleapis.com/kubernetes-release/release",
+        "https://storage.googleapis.com/kubernetes-release/release/stable.txt",
     ),
     (
         "Version Check",
@@ -74,7 +75,7 @@ mod tests {
             Some("raw.githubusercontent.com".to_string())
         );
         assert_eq!(
-            extract_domain("https://storage.googleapis.com/kubernetes-release/release"),
+            extract_domain("https://storage.googleapis.com/kubernetes-release/release/stable.txt"),
             Some("storage.googleapis.com".to_string())
         );
         assert_eq!(
