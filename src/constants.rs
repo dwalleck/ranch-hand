@@ -11,6 +11,17 @@ pub const REQUIRED_ENDPOINTS: &[(&str, &str)] = &[
     ),
     ("K3s Releases", "https://github.com/k3s-io/k3s/releases"),
     (
+        // GitHub serves release asset downloads from this CDN domain
+        // k3s binaries and airgap images are downloaded from here
+        "GitHub Release Assets",
+        "https://objects.githubusercontent.com",
+    ),
+    (
+        // Raw file content from GitHub (checksums, etc.)
+        "GitHub Raw Content",
+        "https://raw.githubusercontent.com",
+    ),
+    (
         "kubectl Releases",
         "https://storage.googleapis.com/kubernetes-release/release",
     ),
@@ -53,6 +64,14 @@ mod tests {
         assert_eq!(
             extract_domain("https://github.com/k3s-io/k3s/releases"),
             Some("github.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://objects.githubusercontent.com"),
+            Some("objects.githubusercontent.com".to_string())
+        );
+        assert_eq!(
+            extract_domain("https://raw.githubusercontent.com"),
+            Some("raw.githubusercontent.com".to_string())
         );
         assert_eq!(
             extract_domain("https://storage.googleapis.com/kubernetes-release/release"),

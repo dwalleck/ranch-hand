@@ -164,16 +164,23 @@ async fn check_domain_inner(domain: &str, insecure: bool) -> Result<(Certificate
     });
 
     // Build TLS config - separate paths for insecure vs secure mode
+    // In secure mode, use platform verifier to match what the OS/browser would see
     let config = if insecure {
         rustls::ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoVerifier))
             .with_no_client_auth()
     } else {
-        let mut root_store = rustls::RootCertStore::empty();
-        root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-        rustls::ClientConfig::builder()
-            .with_root_certificates(root_store)
+        // Use platform certificate verifier (Windows CryptoAPI, macOS Security.framework, etc.)
+        // This matches what Electron/Chromium would see, unlike webpki_roots which uses
+        // Mozilla's bundled CA certificates
+        use rustls_platform_verifier::BuilderVerifierExt;
+        let crypto_provider = Arc::new(rustls::crypto::ring::default_provider());
+        rustls::ClientConfig::builder_with_provider(crypto_provider)
+            .with_safe_default_protocol_versions()
+            .context("Failed to set TLS protocol versions")?
+            .with_platform_verifier()
+            .context("Failed to initialize platform certificate verifier")?
             .with_no_client_auth()
     };
 

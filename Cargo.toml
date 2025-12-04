@@ -29,6 +29,7 @@ futures-util = "0.3"
 url = "2"
 base64 = "0.22"
 rustls = { version = "0.23", features = ["ring"] }
+rustls-platform-verifier = "0.6"
 tokio-rustls = { version = "0.26", features = ["ring"] }
 webpki-roots = "0.26"
 x509-parser = "0.17"
